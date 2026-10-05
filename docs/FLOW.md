@@ -198,7 +198,7 @@ GroupWidget.editingFinished → ToolEditor.onEditingFinished → codeUpdated sig
 - `CWLGraph` (NetworkGraph.py): The graph visualization widget
 - `StepNode`, `InputNode`, `OutputNode` (GraphNodes.py): Node types
 - `CWLNodeItem`, `CWLPortItem`, `GraphControls` (GraphItems.py): Rabix Composer (cwl-svg) drawing of nodes, ports and edges, selection fading, and the canvas buttons (delete, zoom, fit, auto-arrange, export image)
-- Toolbar with Add Step and Duplicate Step buttons and a drop zone for CWL files
+- The graph canvas fills the editor; CWL files dropped on it become steps (`_canvasDrop` in `TabWorkflowEditor.py`). The former toolbar (Add Step, Duplicate Step, legend, drop zone) was removed; `onAddStep` is used by the canvas drop and `onDuplicateStep` has no interface at the moment
 
 **Key Methods**:
 - `setCWLWorkflow(cwl_workflow)`: Stores reference to Workflow object

@@ -405,6 +405,42 @@ def test_linked_views_pan_and_zoom_together(window, workflow):
     assert graph_point(graph2, 'echo', 'circle') == second
 
 
+# ---------------------------------------------------------------------------------------- the editor layout
+def test_the_canvas_fills_the_workflow_editor_and_still_takes_dropped_files(window, workflow, tmp_path):
+    """The toolbar above the canvas (Add Step, Duplicate Step, legend, drop area) is gone; files dropped on the canvas become steps."""
+    import shutil
+    from PyQt6.QtCore import QMimeData, QUrl
+    from PyQt6.QtGui import QDragEnterEvent, QDropEvent
+    document, graph, viewer = workflow
+    editor = document.workflow_editor
+    for name in ('add_step_btn', 'duplicate_step_btn', 'drop_zone'):
+        assert not hasattr(editor, name), name
+    assert editor.layout().count() == 1 and editor.layout().itemAt(0).widget() is editor.splitter, "nothing above the canvas"
+    assert editor.splitter.geometry().top() == 0
+    from PyQt6.QtWidgets import QLabel
+    assert not [label.text() for label in editor.findChildren(QLabel) if label.text() in ('Drop CWL files here', 'Inputs:', 'Outputs:', 'Steps:')]
+
+    # a document dropped on the canvas becomes a step
+    shutil.copy(FIXTURES / '01-hello-world.cwl', tmp_path / 'hello.cwl')
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(tmp_path / 'hello.cwl'))])
+    point = QPointF(200, 200)
+    steps = len(graph.graph.get_nodes_by_type('cwled.step.StepNode'))
+    enter = QDragEnterEvent(point.toPoint(), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(viewer.viewport(), enter)
+    assert enter.isAccepted(), "the canvas accepts a CWL file"
+    drop = QDropEvent(point, Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(viewer.viewport(), drop)
+    pump(15)
+    assert len(graph.graph.get_nodes_by_type('cwled.step.StepNode')) == steps + 1
+    # something that is not a CWL file is refused
+    text = QMimeData()
+    text.setText('not a file')
+    refused = QDragEnterEvent(point.toPoint(), Qt.DropAction.CopyAction, text, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(viewer.viewport(), refused)
+    assert not refused.isAccepted()
+
+
 # ---------------------------------------------------------------------------------------- drawing the graph
 def hover_canvas(viewer):
     """Rest the mouse pointer over the canvas, as it is while someone works on the graph with the keyboard."""
