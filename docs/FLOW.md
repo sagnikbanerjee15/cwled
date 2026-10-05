@@ -815,7 +815,7 @@ Graph emits editingFinished
 A folder of a remote machine (an EC2 instance of `~/.ssh/config`) is *mirrored*: its CWL documents are copied into a folder of the user's machine, which is then an ordinary workspace folder, so nothing else in the application has to know about ssh.
 
 ```
-File > Add Remote Folder (SSH)...  (or the cloud button / context menu of the Workspace panel)
+"+ Add a Remote Folder (SSH)" below "+ Add a Folder" in the side panel (or the Welcome tab / context menu of the Workspace tree)
     ↓
 MainWindow.addRemoteFolder(host window) → RemoteFolderDialog
     ├─ sshConfig.readSshConfig()            hosts of ~/.ssh/config (Include, Host *, first value wins),

@@ -335,6 +335,10 @@ class MainWindow(WorkbenchWindow):
         add_folder_button.setToolTip("Add a folder to the workspace")
         add_folder_button.clicked.connect(self.onAddWorkspaceFolder)
         workspace_row.addWidget(add_folder_button, 0, Qt.AlignmentFlag.AlignTop)
+        self.welcome_add_remote_button = QPushButton("Add Remote Folder...")
+        self.welcome_add_remote_button.setToolTip("Add a folder of another machine (an EC2 instance of ~/.ssh/config) to the workspace")
+        self.welcome_add_remote_button.clicked.connect(self.onAddRemoteFolder)
+        workspace_row.addWidget(self.welcome_add_remote_button, 0, Qt.AlignmentFlag.AlignTop)
         workspace_section.addLayout(workspace_row)
         content_layout.addLayout(workspace_section)
 
@@ -882,9 +886,6 @@ class MainWindow(WorkbenchWindow):
         file_add_folder=QAction(  "Add Folder to Workspace...",owner)
         file_add_folder.setToolTip("Add a folder to the workspace")
         file_add_folder.triggered.connect(owner.onAddWorkspaceFolder)
-        file_add_remote=QAction(  "Add Remote Folder (SSH)...",owner)
-        file_add_remote.setToolTip("Add a folder of another machine (an EC2 instance of ~/.ssh/config) to the workspace")
-        file_add_remote.triggered.connect(owner.onAddRemoteFolder)
         file_sync_remote=QAction(  "Sync Remote Folders",owner)
         file_sync_remote.setToolTip("Copy the remote folders of the workspace again")
         file_sync_remote.triggered.connect(self.syncRemoteFolders)
@@ -953,7 +954,6 @@ class MainWindow(WorkbenchWindow):
         self.updateRecentMenu()
         file_menu.addSeparator()
         file_menu.addAction( file_add_folder )
-        file_menu.addAction( file_add_remote )
         file_menu.addAction( file_sync_remote )
         file_menu.addSeparator()
         file_menu.addAction( file_close )
@@ -1180,7 +1180,7 @@ class MainWindow(WorkbenchWindow):
     def syncRemoteFolders(self):
         if not self.remote.folders():
             QMessageBox.information(self._dialogParent(), "Sync Remote Folders",
-                                    "The workspace has no remote folder. Add one with File > Add Remote Folder (SSH)...")
+                                    "The workspace has no remote folder. Add one with \"Add a Remote Folder (SSH)\" in the side panel.")
             return
         for folder in self.remote.folders():
             self.syncRemoteFolder(folder.mirror)

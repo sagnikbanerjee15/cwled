@@ -127,7 +127,7 @@ The side panel lists the CWL documents of your workspace. Use the *Workspace* an
 
 *Workspace folders*: The workspace can hold several folders, as in Composer; each one is a root of the tree. To add one, click **+ Add a Folder** below the search field, or use **File > Add Folder to Workspace...** or **Add Folder...** on the [Welcome tab](#welcome-tab). To remove one, right-click its root and choose **Remove from Workspace**, or click the × next to it on the Welcome tab; this only removes it from the list, files on disk are not touched. A folder that is already in the workspace, or inside one of its folders, cannot be added again, and adding a parent folder replaces the workspace folders it contains. The folders are remembered between sessions; a folder given with `--workspace`, or set as *Workspace* in the [configuration](#paths-tab), is shown first. New files are saved by default in the folder you are working in (the folder of the item selected in the panel, shown in the status bar), and files can only be saved inside a workspace folder.
 
-*Remote folders*: A folder of another machine, for example an EC2 instance, can be added too: click the cloud button next to the eye button, or use **File > Add Remote Folder (SSH)...** (see [Remote Folders (SSH)](#remote-folders-ssh)). Its root is named `host:/path` and has a server icon.
+*Remote folders*: A folder of another machine, for example an EC2 instance, can be added too: click **+ Add a Remote Folder (SSH)** right below **+ Add a Folder** (or **Add Remote Folder...** on the [Welcome tab](#welcome-tab)) (see [Remote Folders (SSH)](#remote-folders-ssh)). Its root is named `host:/path` and has a server icon.
 
 *Search*: Type part of a file or directory name in the search field and press Enter to show only the matching entries of every workspace folder. Clear the field (or press the × inside it) to show the full tree again.
 
@@ -194,7 +194,7 @@ A comparison is a tab like any other: it can be torn off into a window of its ow
 
 The workspace can hold folders of other machines, typically EC2 instances. CWLed reads the hosts you already have in `~/.ssh/config`, lists the EC2 instances among them, and copies the CWL documents of the folder you choose to your computer. The copy is a workspace folder like any other (search, open, drag onto a workflow, relative paths between workflows and tools all work), and saving a document of it uploads it to the machine again.
 
-**Adding a remote folder**: click the cloud button next to the eye button in the side panel, right-click an empty part of the Workspace tree and choose **Add a Remote Folder (SSH)...**, or use **File > Add Remote Folder (SSH)...**. In the dialog:
+**Adding a remote folder**: click **+ Add a Remote Folder (SSH)** right below **+ Add a Folder** in the side panel, or **Add Remote Folder...** next to **Add Folder...** on the Welcome tab, or right-click an empty part of the Workspace tree and choose **Add a Remote Folder (SSH)...**. In the dialog:
 
 - *The hosts*: the EC2 instances of `~/.ssh/config` are listed with their host name, user and why they are taken for EC2 instances (hover a row). **Show all hosts** also lists the other hosts, the filter field narrows the list, and **Reload** reads the file again after you edited it. The file cannot tell an EC2 instance from another machine, so the signs that are looked for are: an Amazon host name (`ec2-1-2-3-4.compute-1.amazonaws.com`, `*.ec2.internal`, an instance id such as `i-0123456789abcdef0`), a ProxyCommand through AWS (Session Manager, EC2 Instance Connect), a comment above the `Host` line or a host name that says EC2 or AWS, and, as *probably*, a `.pem` key or the default user of an Amazon image (`ec2-user`, `ubuntu`...). `Include` files and the settings of `Host *` blocks are followed as `ssh` does. If the file is missing, or none of its hosts looks like an EC2 instance, the dialog says so and lists every host; **Another host** takes any `user@host` that `ssh` understands.
 - *Folder on the host*: type a path (`~` is the home folder) or use **Browse...** to walk through the folders of the machine. **Test connection** checks that the machine answers and fills in its home folder.
@@ -560,8 +560,6 @@ The application provides four menus: **File**, **Tools**, **Window** and **Help*
 - **Recent** (submenu): The most recently opened files.
 
 - **Add Folder to Workspace...**: Adds a folder to the workspace; it appears as a new root in the Workspace side panel (see [Side Panel](#side-panel)).
-
-- **Add Remote Folder (SSH)...**: Adds a folder of another machine, for example an EC2 instance of your `~/.ssh/config` (see [Remote Folders (SSH)](#remote-folders-ssh)).
 
 - **Sync Remote Folders**: Copies the remote folders of the workspace again.
 

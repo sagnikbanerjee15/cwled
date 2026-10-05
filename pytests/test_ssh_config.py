@@ -131,3 +131,18 @@ def test_an_include_loop_and_odd_lines_do_not_break_the_reading(tmp_path, monkey
                            f'Host ok\n  HostName ec2-1-2-3-4.compute-1.amazonaws.com\n')
     config = readSshConfig(config_file)
     assert 'ok' in hosts_by_alias(config) and hosts_by_alias(config)['ok'].is_ec2
+
+
+def test_a_folder_that_cannot_be_looked_into_gives_an_error_not_a_crash(tmp_path):
+    import os
+    if os.geteuid() == 0:
+        pytest.skip("root can read anything")
+    locked = tmp_path / 'locked'
+    locked.mkdir()
+    (locked / 'config').write_text("Host a\n    HostName b\n")
+    locked.chmod(0)
+    try:
+        config = readSshConfig(locked / 'config')
+    finally:
+        locked.chmod(0o700)
+    assert config.hosts == [] and 'cannot be read' in config.error

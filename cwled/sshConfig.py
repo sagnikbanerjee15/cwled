@@ -246,7 +246,11 @@ def readSshConfig(path: Optional[os.PathLike] = None) -> SshConfig:
     """
     config_path = Path(path) if path is not None else defaultConfigPath()
     config = SshConfig(path=config_path)
-    if not config_path.is_file():
+    try:
+        if not config_path.is_file():
+            return config
+    except OSError as e:                                  # e.g. no permission to look into ~/.ssh
+        config.error = f"{config_path} cannot be read: {e}"
         return config
     config.exists = True
     blocks: List[_Block] = []

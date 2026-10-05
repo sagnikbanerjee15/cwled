@@ -577,8 +577,8 @@ Back up `~/.ssh/config` before editing it for these checks.
 
 ### The hosts
 
-- [ ] **O-01** 🖥 **File → Add Remote Folder (SSH)…** → a dialog opens with the hosts of your `~/.ssh/config`; the text above the list says how many EC2 instances there are among how many hosts. The same dialog opens
-      from the cloud button in the side panel (next to the eye button) and from the context menu of an empty part of the Workspace tree.
+- [ ] **O-01** 🖥 **+ Add a Remote Folder (SSH)** in the side panel, right below **+ Add a Folder** → a dialog opens with the hosts of your `~/.ssh/config`; the text above the list says how many EC2 instances there are among how many hosts. The same dialog opens
+      from **Add Remote Folder…** next to **Add Folder…** on the Welcome tab, from the context menu of an empty part of the Workspace tree, and from the button in the empty side panel (remove every workspace folder). There is **no** entry for it in the File menu (only **Sync Remote Folders**).
 - [ ] **O-02** 🖥 The instances you know are EC2 machines are listed with their host name, user and **yes**; hovering a row shows the key, the jump host, the comment and *why* it counts as EC2
       (an `amazonaws.com` name, an instance id, a comment or name that says EC2/AWS...). A host that only has a `.pem` key says **probably**.
 - [ ] **O-03** 🖥 Hosts that are not EC2 (a laptop, a university cluster) are **not** listed until **Show all hosts** is ticked; then they all are. The filter field narrows the list while typing (name, host name, user, comment).
@@ -615,7 +615,7 @@ Back up `~/.ssh/config` before editing it for these checks.
 - [ ] **O-19** Quit and start CWLed again → the remote root is still there with its `host:/path` name, and saving a document of it still uploads.
 - [ ] **O-20** Right-click the remote root → **Remove from Workspace** → the root goes away; the copy is still on the disk (macOS: `~/Library/Application Support/cwled/remote/<host>/…`). Add the same remote folder again → it reuses that copy
       (a file you changed and could not upload is still there).
-- [ ] **O-21** A **detached window** (section **B**) shows the same `host:/path` name for the root; **File → Add Remote Folder** in the detached window adds the folder to *that window's* workspace; a document of it saved in either window is uploaded.
+- [ ] **O-21** A **detached window** (section **B**) shows the same `host:/path` name for the root; **+ Add a Remote Folder (SSH)** in the side panel of the detached window adds the folder to *that window's* workspace; a document of it saved in either window is uploaded.
 - [ ] **O-22** A workflow in the remote folder whose steps are other files of the same remote folder (`run: tools/x.cwl`) opens with its steps, and clicking the name of a step reveals the tool in the remote root (section **D**).
 - [ ] **O-23** All five themes: the dialog, the hosts table, the red error line and the server icon of the root are readable in each (View → Theme).
 - [ ] **O-24** `remote_folders` in the user configuration file lists the folders (host, path, mirror, synced); delete the entry by hand and start again → the root keeps its folder but is no longer named `host:/path` and no longer uploads.

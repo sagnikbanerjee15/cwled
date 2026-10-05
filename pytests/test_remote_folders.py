@@ -371,7 +371,21 @@ def test_the_root_menu_and_the_menu_bar_offer_the_remote_folders(window, remote_
     assert 'Add a Remote Folder (SSH)...' in [a.text() for a in panel._contextMenu(panel.model.index(-1, -1)).actions()]
     file_menu = window.file_menu
     entries = [action.text() for action in file_menu.actions()]
-    assert 'Add Remote Folder (SSH)...' in entries and 'Sync Remote Folders' in entries
+    assert 'Sync Remote Folders' in entries
+    assert not any('Remote Folder' in entry and 'Sync' not in entry for entry in entries), "the option is next to Add a Folder"
+    # "Add a Remote Folder (SSH)" is right below "Add a Folder" in the side panel, and also on the Welcome tab
+    # (the dialog itself is replaced by a recorder: it would wait for an answer)
+    seen_hosts = []
+    window.addRemoteFolder = lambda host=None: seen_hosts.append(host)
+    assert panel.add_remote_link.text() == 'Add a Remote Folder (SSH)'
+    from PyQt6.QtCore import QPoint
+    above = panel.add_folder_link.mapTo(panel, QPoint(0, 0)).y()
+    below = panel.add_remote_link.mapTo(panel, QPoint(0, 0)).y()
+    assert 0 < above < below < above + 3 * panel.add_folder_link.height(), "right below Add a Folder"
+    panel.add_remote_link.click()
+    assert seen_hosts == [window]
+    window.welcome_add_remote_button.click()
+    assert seen_hosts == [window, window], "the Welcome tab asks for a remote folder for this window's workspace too"
     # the sync of the root menu
     (remote_dir / 'later.cwl').write_text('cwlVersion: v1.2\n')
     seen = []
