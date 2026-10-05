@@ -26,6 +26,7 @@ The architecture of CWLed is designed for flexibility, catering to both visual-o
   - [Document Tabs](#document-tabs)
   - [Detached Windows](#detached-windows)
   - [Comparing Documents](#comparing-documents)
+  - [Remote Folders (SSH)](#remote-folders-ssh)
   - [Welcome Tab](#welcome-tab)
   - [Status Bar](#status-bar)
   - [Themes](#themes)
@@ -126,6 +127,8 @@ The side panel lists the CWL documents of your workspace. Use the *Workspace* an
 
 *Workspace folders*: The workspace can hold several folders, as in Composer; each one is a root of the tree. To add one, click **+ Add a Folder** below the search field, or use **File > Add Folder to Workspace...** or **Add Folder...** on the [Welcome tab](#welcome-tab). To remove one, right-click its root and choose **Remove from Workspace**, or click the × next to it on the Welcome tab; this only removes it from the list, files on disk are not touched. A folder that is already in the workspace, or inside one of its folders, cannot be added again, and adding a parent folder replaces the workspace folders it contains. The folders are remembered between sessions; a folder given with `--workspace`, or set as *Workspace* in the [configuration](#paths-tab), is shown first. New files are saved by default in the folder you are working in (the folder of the item selected in the panel, shown in the status bar), and files can only be saved inside a workspace folder.
 
+*Remote folders*: A folder of another machine, for example an EC2 instance, can be added too: click the cloud button next to the eye button, or use **File > Add Remote Folder (SSH)...** (see [Remote Folders (SSH)](#remote-folders-ssh)). Its root is named `host:/path` and has a server icon.
+
 *Search*: Type part of a file or directory name in the search field and press Enter to show only the matching entries of every workspace folder. Clear the field (or press the × inside it) to show the full tree again.
 
 *Sort by name* / *Sort by date modified*: The two buttons next to the search field sort the tree. Clicking the same button again reverses the order.
@@ -186,6 +189,22 @@ The other document is shown on the left and yours on the right. Both are brought
 - **Swap the sides** exchanges them; **Compare again** reads the documents and files again, with the changes you made since.
 
 A comparison is a tab like any other: it can be torn off into a window of its own, for example next to the workflows it compares. It is not saved with the session.
+
+## Remote Folders (SSH)
+
+The workspace can hold folders of other machines, typically EC2 instances. CWLed reads the hosts you already have in `~/.ssh/config`, lists the EC2 instances among them, and copies the CWL documents of the folder you choose to your computer. The copy is a workspace folder like any other (search, open, drag onto a workflow, relative paths between workflows and tools all work), and saving a document of it uploads it to the machine again.
+
+**Adding a remote folder**: click the cloud button next to the eye button in the side panel, right-click an empty part of the Workspace tree and choose **Add a Remote Folder (SSH)...**, or use **File > Add Remote Folder (SSH)...**. In the dialog:
+
+- *The hosts*: the EC2 instances of `~/.ssh/config` are listed with their host name, user and why they are taken for EC2 instances (hover a row). **Show all hosts** also lists the other hosts, the filter field narrows the list, and **Reload** reads the file again after you edited it. The file cannot tell an EC2 instance from another machine, so the signs that are looked for are: an Amazon host name (`ec2-1-2-3-4.compute-1.amazonaws.com`, `*.ec2.internal`, an instance id such as `i-0123456789abcdef0`), a ProxyCommand through AWS (Session Manager, EC2 Instance Connect), a comment above the `Host` line or a host name that says EC2 or AWS, and, as *probably*, a `.pem` key or the default user of an Amazon image (`ec2-user`, `ubuntu`...). `Include` files and the settings of `Host *` blocks are followed as `ssh` does. If the file is missing, or none of its hosts looks like an EC2 instance, the dialog says so and lists every host; **Another host** takes any `user@host` that `ssh` understands.
+- *Folder on the host*: type a path (`~` is the home folder) or use **Browse...** to walk through the folders of the machine. **Test connection** checks that the machine answers and fills in its home folder.
+- **Add Folder** copies the documents and adds the copy to the workspace. Errors (the machine cannot be reached, there is no such folder) are shown in the dialog.
+
+**What is copied**: the `.cwl`, `.yml`, `.yaml` and `.json` files of the folder and its sub-folders, except hidden folders, `node_modules` and files larger than 2 MB, and at most the first 5000 documents. The copies are kept in the data folder of the application (on macOS `~/Library/Application Support/cwled/remote/<host>/...`), and the folders are remembered between sessions (the `remote_folders` setting).
+
+**Saving and syncing**: saving a document of a remote folder (Save, Save as...) writes it on the machine as well; the status bar says when it is done. If the machine cannot be reached you are told, and the copy on your computer keeps the change. **Sync from Remote** (right-click the root) and **File > Sync Remote Folders** copy the folders again, to bring in what changed on the machine. When a file differs on both sides the newer one wins, so a change that could not be uploaded is not overwritten. Files that were deleted on the machine stay in the copy until you delete them, and deleting a file here does not delete it there.
+
+**Connecting**: CWLed starts the `ssh` program of your computer with the options of your `~/.ssh/config` (keys, jump hosts, Session Manager proxies and so on), but never asks for a password: the key has to be usable without typing, which means loaded in the ssh agent (`ssh-add`) or without a passphrase, and the host key has to be known already (connect once in a terminal). The machine needs only a POSIX shell with `find`, `tar` and `cat`. What the machine sends back is checked: only plain document files inside the copy of the folder are written.
 
 ## Welcome Tab
 
@@ -541,6 +560,10 @@ The application provides four menus: **File**, **Tools**, **Window** and **Help*
 - **Recent** (submenu): The most recently opened files.
 
 - **Add Folder to Workspace...**: Adds a folder to the workspace; it appears as a new root in the Workspace side panel (see [Side Panel](#side-panel)).
+
+- **Add Remote Folder (SSH)...**: Adds a folder of another machine, for example an EC2 instance of your `~/.ssh/config` (see [Remote Folders (SSH)](#remote-folders-ssh)).
+
+- **Sync Remote Folders**: Copies the remote folders of the workspace again.
 
 - **Close tab** (Ctrl+W / ⌘W): Closes the selected document tab. If the document has unsaved changes you are asked whether to save them.
 

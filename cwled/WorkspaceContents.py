@@ -92,6 +92,8 @@ class WorkspaceContents(QMainWindow):
     fileSelected = pyqtSignal(str)  # Signal emitted when a file is selected
     addFolderRequested = pyqtSignal()  # "Add a Folder" was clicked
     removeFolderRequested = pyqtSignal(str)  # "Remove from Workspace" on a workspace folder
+    addRemoteFolderRequested = pyqtSignal()  # "Add a Remote Folder (SSH)" was chosen
+    syncRemoteFolderRequested = pyqtSignal(str)  # "Sync from Remote" on the root of a remote folder
     currentFolderChanged = pyqtSignal(str)  # workspace folder of the selected item
     showHiddenChanged = pyqtSignal(bool)    # the "show hidden folders" setting changed
     followDocumentChanged = pyqtSignal(bool)  # the "follow the open document" setting changed
@@ -124,6 +126,7 @@ class WorkspaceContents(QMainWindow):
         self.show_hidden = bool(configuration.get('workspace_show_hidden', False))   # list folders starting with a dot
         self.follow_document = bool(configuration.get('workspace_follow_document', True))  # select the open document
         self._cwl_folders = {}            # folder -> does it hold documents (valid until the tree is rebuilt)
+        self.remote_labels = {}           # copy of a remote folder -> "host:/path" (see remoteFolders.py)
         self._metadata_cache = {}         # file -> ((mtime, size), (class, version, format))
         self._watcher = QFileSystemWatcher(self)
         self._watcher.directoryChanged.connect(self._onFolderChanged)
@@ -425,6 +428,8 @@ class WorkspaceContents(QMainWindow):
                                               lambda checked: self.setFollowDocument(checked), checkable=True)
         self.follow_btn.setChecked(self.follow_document)
         self.followDocumentChanged.connect(self.follow_btn.setChecked)
+        self.remote_btn = self._sidebarButton('cloud-download', "Add a folder of a remote machine (an EC2 instance) over SSH",
+                                              lambda _checked=False: self.addRemoteFolderRequested.emit())
         for button in (self.sort_by_name_btn, self.sort_by_time_btn, rescan_btn):
             search_row.addWidget(button)
         main_layout.insertLayout(0, search_row)
@@ -442,6 +447,7 @@ class WorkspaceContents(QMainWindow):
         add_folder_row.addWidget(self.add_folder_link)
         add_folder_row.addStretch(1)
         # the settings of the list, here where there is room (the search field needs the width above)
+        add_folder_row.addWidget(self.remote_btn)
         add_folder_row.addWidget(self.hidden_btn)
         add_folder_row.addWidget(self.follow_btn)
         main_layout.insertLayout(1, add_folder_row)
@@ -529,7 +535,13 @@ class WorkspaceContents(QMainWindow):
         if folder is None:
             add_action = menu.addAction("Add a Folder...")
             add_action.triggered.connect(self.addFolderRequested)
+            remote_action = menu.addAction("Add a Remote Folder (SSH)...")
+            remote_action.triggered.connect(self.addRemoteFolderRequested)
         else:
+            if folder in self.remote_labels:
+                sync_action = menu.addAction("Sync from Remote")
+                sync_action.setToolTip(f"Copy {self.remote_labels[folder]} again")
+                sync_action.triggered.connect(lambda _checked=False, f=folder: self.syncRemoteFolderRequested.emit(f))
             remove_action = menu.addAction("Remove from Workspace")
             remove_action.setToolTip(folder)
             remove_action.triggered.connect(lambda _checked=False, f=folder: self.removeFolderRequested.emit(f))
@@ -665,11 +677,22 @@ class WorkspaceContents(QMainWindow):
                 self.tree_view.scrollTo(index, QTreeView.ScrollHint.PositionAtTop)
                 return
 
+    def setRemoteLabels(self, labels: dict):
+        """Name the roots that are copies of remote folders (``{copy: "host:/path"}``) and redraw the tree."""
+        labels = dict(labels or {})
+        if labels == self.remote_labels:
+            return
+        self.remote_labels = labels
+        self.refresh()
+
     def _rootLabels(self) -> dict:
         """Root names: the folder name, with its parent when two folders share a name."""
         names = Counter(Path(folder).name for folder in self.workspace_folders)
         labels = {}
         for folder in self.workspace_folders:
+            if folder in self.remote_labels:
+                labels[folder] = self.remote_labels[folder]
+                continue
             path = Path(folder)
             label = path.name or str(path)
             if names[path.name] > 1:
@@ -680,7 +703,12 @@ class WorkspaceContents(QMainWindow):
     def _makeRootRow(self, root_path: Path, label: str) -> list:
         """The row of a workspace folder at the top level of the tree."""
         root_item = QStandardItem(label)
-        root_item.setToolTip(str(root_path))
+        remote = self.remote_labels.get(str(root_path))
+        if remote:
+            root_item.setIcon(theme.icon('server'))
+            root_item.setToolTip(f"{remote}\nCopy on this computer: {root_path}")
+        else:
+            root_item.setToolTip(str(root_path))
         root_mtime = root_path.stat().st_mtime if root_path.exists() else None
         root_item.setData(str(root_path), ROLE_PATH)
         root_item.setData(True, ROLE_IS_DIRECTORY)

@@ -9,6 +9,9 @@ workspace: null
 # Folders of the workspace (roots of the Workspace panel), managed with
 # "Add Folder to Workspace..." and "Remove from Workspace"
 workspace_folders: []
+# Folders of remote machines (EC2 instances...) copied to this computer, managed with
+# "Add Remote Folder (SSH)...": host, path on the host, folder of the copy
+remote_folders: []
 # Open the documents (and the windows that tabs were torn off into) of the last session again at start
 restore_session: true
 # What was open when the application was closed (managed by the application)

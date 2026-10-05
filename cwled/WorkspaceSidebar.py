@@ -117,6 +117,8 @@ class WorkspaceSidebar(QWidget):
     recentFileSelected = pyqtSignal(str)    # a recent file was opened
     addFolderRequested = pyqtSignal()
     removeFolderRequested = pyqtSignal(str)
+    addRemoteFolderRequested = pyqtSignal()
+    syncRemoteFolderRequested = pyqtSignal(str)
     currentFolderChanged = pyqtSignal(str)
 
     def __init__(self, folders: List[str], parent=None):
@@ -163,6 +165,8 @@ class WorkspaceSidebar(QWidget):
         self.workspace_panel.addFolderRequested.connect(self.addFolderRequested)
         self.workspace_panel.removeFolderRequested.connect(self.removeFolderRequested)
         self.workspace_panel.currentFolderChanged.connect(self.currentFolderChanged)
+        self.workspace_panel.addRemoteFolderRequested.connect(self.addRemoteFolderRequested)
+        self.workspace_panel.syncRemoteFolderRequested.connect(self.syncRemoteFolderRequested)
         self.pages.addWidget(self.workspace_panel)
 
         self.recent_panel = self.buildRecentList()
@@ -179,6 +183,9 @@ class WorkspaceSidebar(QWidget):
 
     def setWorkspaceFolders(self, folders: List[str]):
         self.workspace_panel.setWorkspaceFolders(folders)
+
+    def setRemoteLabels(self, labels: dict):
+        self.workspace_panel.setRemoteLabels(labels)
 
     def setRecentFiles(self, files: Iterable[str]):
         self.recent_panel.setFiles(files)

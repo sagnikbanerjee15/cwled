@@ -42,6 +42,8 @@ import theme
 import GraphItems
 import DocumentDiff
 from TabDiff import DiffView
+from remoteFolders import RemoteFolders
+from RemoteFolderDialog import RemoteFolderDialog
 logger = logging.getLogger(__name__)
 
 
@@ -106,6 +108,12 @@ class MainWindow(WorkbenchWindow):
         self._recent_menus=[]      # the Recent menu of every window
         self._window_menus=[]      # the Window menu of every window
         self._theme_menus=[]       # the View > Theme menu of every window
+        self.remote=RemoteFolders(parent=self)   # folders of remote machines, copied here (see remoteFolders.py)
+        self.remote.changed.connect(self.updateRemoteViews)
+        self.remote.synced.connect(self.onRemoteSynced)
+        self.remote.syncFailed.connect(self.onRemoteSyncFailed)
+        self.remote.uploaded.connect(self.onRemoteUploaded)
+        self.remote.uploadFailed.connect(self.onRemoteUploadFailed)
         theme.notifier.themeChanged.connect(self._refreshThemeMenus)
         GraphItems.LINK.changed.connect(lambda _enabled: self.refreshWindowMenus())
         self.logger.info(f"Setting up {self.__class__.__name__}")
@@ -874,6 +882,12 @@ class MainWindow(WorkbenchWindow):
         file_add_folder=QAction(  "Add Folder to Workspace...",owner)
         file_add_folder.setToolTip("Add a folder to the workspace")
         file_add_folder.triggered.connect(owner.onAddWorkspaceFolder)
+        file_add_remote=QAction(  "Add Remote Folder (SSH)...",owner)
+        file_add_remote.setToolTip("Add a folder of another machine (an EC2 instance of ~/.ssh/config) to the workspace")
+        file_add_remote.triggered.connect(owner.onAddRemoteFolder)
+        file_sync_remote=QAction(  "Sync Remote Folders",owner)
+        file_sync_remote.setToolTip("Copy the remote folders of the workspace again")
+        file_sync_remote.triggered.connect(self.syncRemoteFolders)
         file_close=QAction(  "Close tab",owner)
         file_close.setShortcut(QKeySequence.StandardKey.Close)
         file_close.triggered.connect(self.onMenuCloseTab)
@@ -939,6 +953,8 @@ class MainWindow(WorkbenchWindow):
         self.updateRecentMenu()
         file_menu.addSeparator()
         file_menu.addAction( file_add_folder )
+        file_menu.addAction( file_add_remote )
+        file_menu.addAction( file_sync_remote )
         file_menu.addSeparator()
         file_menu.addAction( file_close )
         file_menu.addAction( file_exit )
@@ -1145,6 +1161,63 @@ class MainWindow(WorkbenchWindow):
         else:
             self.logger.debug("No active window set")
     
+    # -- remote folders ------------------------------------------------------------------------------------------
+    def addRemoteFolder(self, host: WorkbenchWindow = None):
+        """Ask for a folder of a remote machine, copy it and add the copy to the workspace of ``host``."""
+        host = host if host is not None else self.activeHost()
+        dialog = RemoteFolderDialog(self.remote, host)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.folder is not None:
+            if host.addWorkspaceFolder(dialog.folder.mirror):
+                host.statusBar().showMessage(f"Added {dialog.folder.label} to the workspace", 8000)
+
+    def syncRemoteFolder(self, mirror: str):
+        """Copy a remote folder again (the result is shown in the status bar)."""
+        folder = self.remote.folderFor(mirror)
+        if folder is not None:
+            self.activeHost().statusBar().showMessage(f"Syncing {folder.label} ...", 0)
+            self.remote.sync(folder.mirror)
+
+    def syncRemoteFolders(self):
+        if not self.remote.folders():
+            QMessageBox.information(self._dialogParent(), "Sync Remote Folders",
+                                    "The workspace has no remote folder. Add one with File > Add Remote Folder (SSH)...")
+            return
+        for folder in self.remote.folders():
+            self.syncRemoteFolder(folder.mirror)
+
+    def updateRemoteViews(self):
+        """The list of remote folders changed: the roots of every Workspace panel are named again."""
+        for window in self.workbenchWindows():
+            window.applyRemoteLabels()
+
+    def onRemoteSynced(self, mirror: str, result):
+        folder = self.remote.folderFor(mirror)
+        self.activeHost().statusBar().showMessage(f"{folder.label if folder else mirror}: {result.summary()}", 8000)
+        for window in self.workbenchWindows():
+            window.sidebar.workspace_panel.refresh()
+
+    def onRemoteSyncFailed(self, mirror: str, why: str):
+        folder = self.remote.folderFor(mirror)
+        self.activeHost().statusBar().clearMessage()
+        QMessageBox.warning(self._dialogParent(), "Sync from Remote",
+                            f"{folder.label if folder else mirror} could not be copied:\n\n{why}")
+
+    def onDocumentSaved(self, file_path: str):
+        """A document was saved: if it is in the copy of a remote folder it is uploaded as well."""
+        if self.remote.upload(file_path):
+            folder = self.remote.folderFor(file_path)
+            self.activeHost().statusBar().showMessage(f"Uploading to {folder.label} ...", 0)
+
+    def onRemoteUploaded(self, file_path: str, label: str):
+        self.activeHost().statusBar().showMessage(f"Saved on {label}", 5000)
+
+    def onRemoteUploadFailed(self, file_path: str, why: str):
+        self.activeHost().statusBar().clearMessage()
+        QMessageBox.warning(self._dialogParent(), "Upload to Remote",
+                            f"{Path(file_path).name} was saved on this computer but could not be uploaded:\n\n{why}\n\n"
+                            "The copy here is kept, and a sync from the remote machine will not overwrite it. "
+                            "Save the document again when the machine can be reached.")
+
     def add_window_to_menu(self, cwl_type:str='CommandLineTool', host:WorkbenchWindow=None):
         """
         Create a document of the given type as a new tab of ``host`` (by
@@ -1174,6 +1247,7 @@ class MainWindow(WorkbenchWindow):
         
         # Connect to the windowClosed signal to remove the window from the menu when closed
         child_window.windowClosed.connect(self.remove_window_from_menu)
+        child_window.fileSaved.connect(self.onDocumentSaved)
         
         # Connect menu actions from child window to parent window handlers
         child_window.menuConfiguration.connect(self.onMenuConfiguration)

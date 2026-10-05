@@ -11,7 +11,7 @@ Each item reads: *what to do* → *what should happen*. Tick it when it does. No
 ## How to use this list
 
 1. Start with section **A** (things only real hardware can confirm), then go through the sections of
-   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, and **T** the tests and documentation.
+   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, **O** the remote folders over SSH (only on the `ssh-remote-folders` branch), and **T** the tests and documentation.
 2. Use a scratch copy of the test documents, so that saving never touches the repository (outside the temporary directory, see below):
 
    ```bash
@@ -567,6 +567,61 @@ Related quirks noticed there and **not fixed** (do not report them as new bugs):
 
 ---
 
+## O. Remote folders over SSH (EC2 instances)
+
+Branch `ssh-remote-folders`. The automated tests copy and upload with a shell on the same machine (no network, no
+`ssh`), so everything that needs a real instance is here. You need an EC2 instance (or any machine you can `ssh` to with
+a key that needs no typing: `ssh-add` it first) and a folder on it with a few CWL documents, for example
+`ssh my-ec2 'mkdir -p ~/cwl-test && cat > ~/cwl-test/hello.cwl' < tests/01-hello-world.cwl`.
+Back up `~/.ssh/config` before editing it for these checks.
+
+### The hosts
+
+- [ ] **O-01** 🖥 **File → Add Remote Folder (SSH)…** → a dialog opens with the hosts of your `~/.ssh/config`; the text above the list says how many EC2 instances there are among how many hosts. The same dialog opens
+      from the cloud button in the side panel (next to the eye button) and from the context menu of an empty part of the Workspace tree.
+- [ ] **O-02** 🖥 The instances you know are EC2 machines are listed with their host name, user and **yes**; hovering a row shows the key, the jump host, the comment and *why* it counts as EC2
+      (an `amazonaws.com` name, an instance id, a comment or name that says EC2/AWS...). A host that only has a `.pem` key says **probably**.
+- [ ] **O-03** 🖥 Hosts that are not EC2 (a laptop, a university cluster) are **not** listed until **Show all hosts** is ticked; then they all are. The filter field narrows the list while typing (name, host name, user, comment).
+- [ ] **O-04** 🖥 Edit `~/.ssh/config` (add an EC2 host with a comment line `# EC2 test` above its `Host` line), press **Reload** → the new host appears without closing the dialog. Put a host in a file that the config
+      `Include`s (`Include config.d/*`) → it is listed too. A `Host *` block with a `User` or `IdentityFile` is applied to the hosts below it as `ssh` does (compare with `ssh -G <host>`).
+- [ ] **O-05** 🖥 Move `~/.ssh/config` away for a moment → the dialog says there is no SSH configuration and names the path; typing `user@ec2-….compute.amazonaws.com` in **Another host** still works. An empty config, or one without EC2 hosts,
+      says so and lists every host.
+- [ ] **O-06** 🖥 **Test connection** on a host → "Connected to … Its home folder is /home/…" and the folder field is filled in. On a host that is down: the error text from `ssh` appears in red and the dialog stays usable.
+
+### Choosing and adding a folder
+
+- [ ] **O-07** 🖥 **Browse…** → the folders of the instance are listed (hidden ones too, files greyed); a double click goes into a folder, **Up** goes back, a path typed in the field + Return jumps there, **Choose this folder** fills the field.
+- [ ] **O-08** 🖥 **Add Folder** → the dialog shows "Copying…", then closes. The Workspace panel gets a root named `my-ec2:/home/…/cwl-test` with a server icon; its tooltip shows the remote path and where the copy is on this computer. Only the documents
+      of the folder are there (no `.git`, no hidden folders, no `node_modules`, no notes or images, nothing over 2 MB).
+- [ ] **O-09** 🖥 Open a document of the remote root, edit it, **Save** → the status bar says "Uploading to …" and then "Saved on my-ec2:/…". Check on the instance (`ssh my-ec2 cat ~/cwl-test/hello.cwl`) that the new content is there, and that
+      the file keeps its owner and mode (`ls -l`).
+- [ ] **O-10** 🖥 **Save as…** a new name, inside a **new sub-folder** of the remote root → the file (and the folder) appear on the instance. **Save as** a name *outside* the remote root → nothing is uploaded.
+- [ ] **O-11** 🖥 On the instance, change a file and add one (`echo … > ~/cwl-test/new.cwl`); in CWLed right-click the remote root → **Sync from Remote** → the status bar says how many files were copied, `new.cwl` appears in the tree, and an open
+      document that changed asks whether to reload (as for any file changed by another program).
+- [ ] **O-12** 🖥 **File → Sync Remote Folders** syncs every remote folder; without a remote folder it says that the workspace has none.
+
+### When things go wrong
+
+- [ ] **O-13** 🖥 Turn Wi-Fi off, edit a remote document and **Save** → a warning says the file was saved on this computer but could not be uploaded (with the `ssh` error) and the document is still marked saved locally.
+      Turn Wi-Fi on, **Save** again → it is uploaded. Repeat the offline save, then **Sync from Remote** *before* saving again → your change is still in the file (it is newer than the remote one).
+- [ ] **O-14** 🖥 Use a key with a passphrase that is **not** in the agent (`ssh-add -D` first) → the error says CWLed never asks for a password and that the key has to be added with `ssh-add`; after `ssh-add` it works.
+- [ ] **O-15** 🖥 Use a host that is not in `~/.ssh/known_hosts` → the error tells you to connect once in a terminal to accept the host key; it does **not** accept it silently.
+- [ ] **O-16** 🖥 A host that needs `ProxyJump` (bastion) or an `aws ssm` ProxyCommand works exactly as `ssh <host>` does in a terminal (if you have one of these).
+- [ ] **O-17** A folder path that does not exist on the instance → "The folder … cannot be opened on …" in the dialog, nothing is added and no empty root appears.
+- [ ] **O-18** The dialog while a copy is running: **Cancel** and the window close button do nothing until the copy ends (known limitation: there is no way to cancel it).
+
+### Afterwards
+
+- [ ] **O-19** Quit and start CWLed again → the remote root is still there with its `host:/path` name, and saving a document of it still uploads.
+- [ ] **O-20** Right-click the remote root → **Remove from Workspace** → the root goes away; the copy is still on the disk (macOS: `~/Library/Application Support/cwled/remote/<host>/…`). Add the same remote folder again → it reuses that copy
+      (a file you changed and could not upload is still there).
+- [ ] **O-21** A **detached window** (section **B**) shows the same `host:/path` name for the root; **File → Add Remote Folder** in the detached window adds the folder to *that window's* workspace; a document of it saved in either window is uploaded.
+- [ ] **O-22** A workflow in the remote folder whose steps are other files of the same remote folder (`run: tools/x.cwl`) opens with its steps, and clicking the name of a step reveals the tool in the remote root (section **D**).
+- [ ] **O-23** All five themes: the dialog, the hosts table, the red error line and the server icon of the root are readable in each (View → Theme).
+- [ ] **O-24** `remote_folders` in the user configuration file lists the folders (host, path, mirror, synced); delete the entry by hand and start again → the root keeps its folder but is no longer named `host:/path` and no longer uploads.
+
+---
+
 ## S. The modified marker (`*`) and the "Save changes?" prompt
 
 A bug report from hand-testing: after changing a workflow the `*` did not appear by itself (only after switching to another tab), and a window could be closed without being asked to save.
@@ -620,6 +675,7 @@ For each edit: **the `*` appears at once**, both in front of the **tab title** a
       and note any statement that is wrong or any behaviour that is missing from it.
 - [ ] **T-06** `DEV.md` (*Automated tests*) describes how to run the tests and links to this file.
 - [ ] **T-07** `tests/` contains **only CWL documents** (and their input files): no Python files, no `conftest.py`. The test code is in `pytests/`, and `uv run pytest pytests/test_graph_canvas.py -k pan` (the example in `DEV.md`) runs.
+- [ ] **T-08** `uv run pytest pytests/test_ssh_config.py pytests/test_remote_folders.py` passes (seconds): the SSH configuration reader and the remote folders, tested with a shell on this machine instead of `ssh`. They never read your `~/.ssh` or touch the data folder of the application.
 
 ---
 

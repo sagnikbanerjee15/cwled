@@ -23,6 +23,18 @@ def pump(count: int = 5):
         QTest.qWait(10)
 
 
+def wait_until(condition, timeout: float = 15.0, message: str = "the condition did not become true"):
+    """Let the event loop run until ``condition()`` is true (work done in other threads reports back through it)."""
+    import time
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return
+        QApplication.processEvents()
+        QTest.qWait(10)
+    assert condition(), message
+
+
 def titles(tabs):
     return [tabs.tabText(index) for index in range(tabs.count())]
 

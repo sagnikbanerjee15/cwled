@@ -65,6 +65,8 @@ class WorkbenchWindow(QMainWindow):
         self.sidebar.recentFileSelected.connect(self.openRecentFile)
         self.sidebar.addFolderRequested.connect(self.onAddWorkspaceFolder)
         self.sidebar.removeFolderRequested.connect(self.onRemoveWorkspaceFolder)
+        self.sidebar.addRemoteFolderRequested.connect(self.onAddRemoteFolder)
+        self.sidebar.syncRemoteFolderRequested.connect(self.controller.syncRemoteFolder)
         self.sidebar.currentFolderChanged.connect(self.onCurrentWorkspaceFolderChanged)
         self.sidebar.workspace_panel.followDocumentChanged.connect(
             lambda follow: follow and self.followCurrentDocument())
@@ -99,6 +101,7 @@ class WorkbenchWindow(QMainWindow):
         self.workspace_status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         status_bar.addWidget(self.workspace_status, 1)
         self._updateWorkspaceStatus()
+        self.applyRemoteLabels()
 
     def tabWindowLabel(self) -> str:
         """How this window is named in the tab menus."""
@@ -161,6 +164,17 @@ class WorkbenchWindow(QMainWindow):
         """Refresh every view showing the workspace folders of this window."""
         self._updateWorkspaceStatus()
         self.sidebar.setWorkspaceFolders(self.workspace.folders())
+        self.applyRemoteLabels()
+
+    def applyRemoteLabels(self):
+        """Name the roots of the Workspace panel that are copies of remote folders."""
+        remote = getattr(self.controller, 'remote', None)
+        if remote is not None:
+            self.sidebar.setRemoteLabels(remote.labels())
+
+    def onAddRemoteFolder(self):
+        """Choose a folder of a remote machine (an EC2 instance of the SSH configuration) and add it."""
+        self.controller.addRemoteFolder(self)
 
     def _updateWorkspaceStatus(self):
         """Status bar: the current workspace folder (where new files go) and the number of others."""

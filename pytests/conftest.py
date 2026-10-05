@@ -24,11 +24,12 @@ sys.path.insert(0, str(REPO / 'cwled'))   # the modules import each other as top
 import platformdirs  # noqa: E402  (must be patched before the application modules are imported)
 
 _USER_DIRS = Path(tempfile.mkdtemp(prefix='cwled-tests-'))
-for _name in ('logs', 'cache', 'config'):
+for _name in ('logs', 'cache', 'config', 'data'):
     (_USER_DIRS / _name).mkdir()
 platformdirs.user_log_path = lambda *args, **kwargs: _USER_DIRS / 'logs'
 platformdirs.user_cache_path = lambda *args, **kwargs: _USER_DIRS / 'cache'
 platformdirs.user_config_path = lambda *args, **kwargs: _USER_DIRS / 'config'
+platformdirs.user_data_path = lambda *args, **kwargs: _USER_DIRS / 'data'     # e.g. the copies of remote folders
 
 import watchdog.observers  # noqa: E402
 import watchdog.observers.polling  # noqa: E402

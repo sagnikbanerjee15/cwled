@@ -337,7 +337,7 @@ FA = {
     'bolt': '\uf0e7', 'book': '\uf02d', 'caret-down': '\uf0d7',
     'caret-right': '\uf0da', 'caret-up': '\uf0d8', 'check': '\uf00c',
     'check-circle-o': '\uf05d', 'chevron-down': '\uf078', 'clock-o': '\uf017',
-    'cloud-download': '\uf0ed', 'cloud-upload': '\uf0ee', 'code': '\uf121',
+    'cloud': '\uf0c2', 'cloud-download': '\uf0ed', 'cloud-upload': '\uf0ee', 'server': '\uf233', 'code': '\uf121',
     'code-fork': '\uf126', 'cog': '\uf013', 'compress': '\uf066', 'ellipsis-h': '\uf141',
     'eye': '\uf06e', 'file-code-o': '\uf1c9', 'file-image-o': '\uf1c5',
     'file-o': '\uf016', 'files-o': '\uf0c5',

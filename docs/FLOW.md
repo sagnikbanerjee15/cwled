@@ -10,6 +10,7 @@
 - [Tab Synchronization Mechanism](#tab-synchronization-mechanism)
 - [Data Flow Patterns](#data-flow-patterns)
 - [Dialog System](#dialog-system)
+- [Remote Folders](#remote-folders)
 - [Graph Visualization](#graph-visualization)
 
 ## Overview
@@ -806,6 +807,39 @@ Graph emits editingFinished
     ↓
 [Normal update cycle continues]
 ```
+
+## Remote Folders
+
+**Location**: `sshConfig.py`, `remoteFolders.py`, `RemoteFolderDialog.py`
+
+A folder of a remote machine (an EC2 instance of `~/.ssh/config`) is *mirrored*: its CWL documents are copied into a folder of the user's machine, which is then an ordinary workspace folder, so nothing else in the application has to know about ssh.
+
+```
+File > Add Remote Folder (SSH)...  (or the cloud button / context menu of the Workspace panel)
+    ↓
+MainWindow.addRemoteFolder(host window) → RemoteFolderDialog
+    ├─ sshConfig.readSshConfig()            hosts of ~/.ssh/config (Include, Host *, first value wins),
+    │                                       classify() marks the EC2 instances (SshHost.ec2_level / ec2_reasons)
+    ├─ RemoteFolderBrowser                  listDirectory() over ssh to pick the folder
+    └─ RemoteFolders.addFolder(host, path)  (worker thread)
+           resolvePath() → pullFolder(): "find ... | tar -cf -" on the machine, read entry by entry here;
+           only plain files with a plain relative name, below the copy, are written
+    ↓
+RemoteFolders.changed → every window's Workspace panel names the root "host:/path"
+MainWindow.addWorkspaceFolder(copy)         the copy becomes a workspace folder
+
+Save / Save as...  ChildWindow.saveFile() → fileSaved(path)
+    ↓
+MainWindow.onDocumentSaved() → RemoteFolders.upload(path)   if the file is inside a copy
+    ↓
+pushFile(): "cat > tmp && mv tmp file" on the machine (keeps the mode of the old file)
+    ↓
+uploaded / uploadFailed → status bar message / warning (the copy here keeps the change)
+
+Sync from Remote → RemoteFolders.sync() → pullFolder() again: where a file differs on both sides the newer wins
+```
+
+`Transport` runs a shell script on a machine: `SshTransport` is the `ssh` program (`BatchMode`, so it never asks for a password), `LocalTransport` runs the same scripts in a local shell, which is what the tests do (`pytests/test_remote_folders.py`). The list is kept in the configuration as `remote_folders` (`host`, `path`, `mirror`, `synced`); the copies live under `platformdirs.user_data_path('cwled')/remote/<host>/<path>`.
 
 ## Themes
 

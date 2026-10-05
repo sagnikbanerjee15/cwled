@@ -335,6 +335,7 @@ class ChildWindow(QDialog):
     menuGitCommit = pyqtSignal()
     menuGitPush = pyqtSignal()
     menuGitPull = pyqtSignal()
+    fileSaved = pyqtSignal(str)  # the document was written to this file (after Save, Save as...)
     windowClosed = pyqtSignal(int)  # signal to emit when window is closed, with window_id
     cwl_tool = None  # this is the cwl tool that we carry over in this window
     cwl_version=None # version of the tools
@@ -2103,6 +2104,7 @@ class ChildWindow(QDialog):
           
                 self.file_path = file_path
                 self.logger.info(f"\u2705 CWL saved in {file_path}")
+                self.fileSaved.emit(str(file_path))
             except Exception as e:
                 self.logger.error(f"\u274C Unable to save the contents to file. {e}")
                 
