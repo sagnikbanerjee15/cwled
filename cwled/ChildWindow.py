@@ -568,6 +568,17 @@ class ChildWindow(QDialog):
             return parsed.path
         return path_text
 
+    def workspaceDirectory(self):
+        """
+        The current workspace folder of the window that shows this document (a
+        window that the tab was torn off into has a workspace of its own), or
+        the one of the main window.
+        """
+        workspace = getattr(self.window(), 'workspace', None)
+        current = workspace.currentFolder() if workspace is not None else None
+        current = current or getattr(data, 'workspace_directory', None)
+        return Path(current) if current else None
+
     def getDisplayFilePath(self) -> str:
         """Return a stable, user-facing path for titles; never show temp parser URIs."""
         current = self._normalize_path_for_display(self.file_path) if self.file_path else ""
@@ -640,10 +651,7 @@ class ChildWindow(QDialog):
             self.onMenuSaveFile(str(self.file_path), self.file_format)
             return
 
-        if hasattr(data, 'workspace_directory') and data.workspace_directory:
-            home_dir = str(data.workspace_directory)
-        else:
-            home_dir = str(Path.home())
+        home_dir = str(self.workspaceDirectory() or Path.home())
 
         filters = "YAML (*.cwl);;YAML (*.yaml);;JSON (*.cwl);;JSON (*.json)"
         file_path, selected_filter = QFileDialog.getSaveFileName(
@@ -768,8 +776,8 @@ class ChildWindow(QDialog):
     def onToolbarGitPush(self):
         """Push the current branch to its default remote."""
         target_path = self.file_path
-        if not target_path and hasattr(data, 'workspace_directory'):
-            target_path = str(data.workspace_directory)
+        if not target_path and self.workspaceDirectory():
+            target_path = str(self.workspaceDirectory())
 
         version = GitVersion(target_path if target_path else "<unsaved>")
         try:
@@ -799,8 +807,8 @@ class ChildWindow(QDialog):
                 return
 
         target_path = self.file_path
-        if not target_path and hasattr(data, 'workspace_directory'):
-            target_path = str(data.workspace_directory)
+        if not target_path and self.workspaceDirectory():
+            target_path = str(self.workspaceDirectory())
 
         version = GitVersion(target_path if target_path else "<unsaved>")
         try:
@@ -957,8 +965,8 @@ class ChildWindow(QDialog):
         # the directory is the parent of that cwl object
         if self.file_path:
                 default_dir = Path(self.file_path).parent
-        elif hasattr(data, 'workspace_directory') and data.workspace_directory:
-                default_dir = data.workspace_directory
+        elif self.workspaceDirectory():
+                default_dir = self.workspaceDirectory()
         else:
                 default_dir = Path.home()
         # add a random string at the end
