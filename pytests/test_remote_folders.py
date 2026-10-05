@@ -563,3 +563,197 @@ def test_the_browser_chooses_the_folder_that_is_highlighted_else_the_one_shown(w
     wait_until(lambda: shown.list.count())
     shown._choose()
     assert shown.selected == str(remote_dir.resolve()), "nothing highlighted: the folder that is shown"
+
+
+# ------------------------------------------------------------------------------------------------ what a workflow refers to
+WORKFLOW = """cwlVersion: v1.2
+class: Workflow
+requirements:
+  SubworkflowFeatureRequirement: {}
+inputs:
+  message: string
+outputs:
+  out:
+    type: string
+    outputSource: uppercase/uppercase_message
+steps:
+  echo:
+    run: ../../../tools/echo/1.0/tl-echo.cwl
+    in: {message: message}
+    out: [out]
+  uppercase:
+    run: ../../../tools/uppercase/2.0/tl-uppercase.cwl
+    in:
+      message: {source: echo/out}
+    out: [uppercase_message]
+"""
+NESTED = """cwlVersion: v1.2
+class: Workflow
+requirements:
+  SubworkflowFeatureRequirement: {}
+inputs:
+  message: string
+outputs:
+  out:
+    type: string
+    outputSource: inner/out
+steps:
+  inner:
+    run: ../../../workflows/inner/1.0/wf-inner.cwl
+    in: {message: message}
+    out: [out]
+"""
+
+
+@pytest.fixture
+def pipeline(tmp_path):
+    """A remote project laid out like a repository of pipelines: workflows, and the tools they use in other folders."""
+    root = tmp_path / 'remote' / 'pipeline-assets'
+    for folder in ('workflows/end_to_end/1.0.2', 'workflows/nested/1.0', 'workflows/inner/1.0', 'tools/echo/1.0',
+                   'tools/uppercase/2.0', 'tools/unused'):
+        (root / folder).mkdir(parents=True)
+    (root / 'workflows/end_to_end/1.0.2/wf-end_to_end.cwl').write_text(WORKFLOW)
+    (root / 'workflows/nested/1.0/wf-nested.cwl').write_text(NESTED)
+    (root / 'workflows/inner/1.0/wf-inner.cwl').write_text(WORKFLOW.replace('../../../tools', '../../../tools'))
+    shutil.copy(FIXTURES / 'echo.cwl', root / 'tools/echo/1.0/tl-echo.cwl')
+    shutil.copy(FIXTURES / 'uppercase.cwl', root / 'tools/uppercase/2.0/tl-uppercase.cwl')
+    shutil.copy(FIXTURES / 'echo.cwl', root / 'tools/unused/tl-unused.cwl')
+    return root
+
+
+def open_levels(manager, folder, *relative):
+    """Open (read) the folders ``relative`` to the copy, one after the other, as the user does in the panel."""
+    mirror = Path(folder.mirror)
+    for path in relative:
+        target = mirror / path
+        if manager.isUnfetched(target):
+            manager.fetchLevel(target)
+            wait_until(lambda target=target: not manager.isUnfetched(target))
+    return mirror
+
+
+def test_the_references_of_a_document_are_read_as_ssh_users_write_them(tmp_path):
+    document = tmp_path / 'a' / 'wf.cwl'
+    document.parent.mkdir()
+    document.write_text("""cwlVersion: v1.2
+class: Workflow
+requirements:
+  SchemaDefRequirement:
+    types:
+      - $import: types.yml
+steps:
+  one: {run: ../tools/one.cwl#main, in: {}, out: []}
+  two: {run: "my%20tools/two.cwl", in: {}, out: []}
+  three: {run: "#inline", in: {}, out: []}
+  four: {run: "https://example.org/four.cwl", in: {}, out: []}
+  five: {run: "file:///abs/five.cwl", in: {}, out: []}
+  six:
+    run:
+      class: CommandLineTool
+      requirements:
+        InlineJavascriptRequirement:
+          expressionLib:
+            - $include: lib.js
+      inputs: []
+      outputs: []
+    in: {}
+    out: []
+""")
+    references = sorted(rf.documentReferences(document))
+    assert references == sorted(['types.yml', '../tools/one.cwl#main', 'my%20tools/two.cwl', '#inline',
+                                 'https://example.org/four.cwl', 'file:///abs/five.cwl', 'lib.js'])
+    where = {reference: rf.referencedPath(document, reference) for reference in references}
+    base = str(tmp_path / 'a')
+    assert where['types.yml'] == f"{base}/types.yml" and where['lib.js'] == f"{base}/lib.js"
+    assert where['../tools/one.cwl#main'] == str(tmp_path / 'tools' / 'one.cwl'), "..  and the fragment are resolved"
+    assert where['my%20tools/two.cwl'] == f"{base}/my tools/two.cwl", "%20 is a space"
+    assert where['file:///abs/five.cwl'] == '/abs/five.cwl'
+    assert where['#inline'] is None and where['https://example.org/four.cwl'] is None, "not files"
+    assert rf.documentReferences(tmp_path / 'missing.cwl') == [] and rf.documentReferences(FIXTURES / '07-record.input.yaml') == []
+
+
+def test_what_a_workflow_needs_is_found_through_the_files_that_are_there(remote, pipeline):
+    folder = add(remote, 'vci', str(pipeline))['folder']
+    mirror = open_levels(remote, folder, 'workflows', 'workflows/nested', 'workflows/nested/1.0')
+    needs = remote.dependencies(mirror / 'workflows/nested/1.0/wf-nested.cwl')
+    assert needs.missing == ['workflows/inner/1.0/wf-inner.cwl'], "the sub-workflow first: its own tools are known once it is here"
+    assert needs.outside == []
+    done = {}
+    remote.fetchDependencies(mirror / 'workflows/nested/1.0/wf-nested.cwl', lambda result, error: done.update(result=result, error=error))
+    wait_until(lambda: done)
+    assert done['error'] is None and done['result'].missing == [] and done['result'].fetched == 3, "inner workflow and its two tools"
+    assert (mirror / 'tools/echo/1.0/tl-echo.cwl').is_file() and (mirror / 'tools/uppercase/2.0/tl-uppercase.cwl').is_file()
+    assert not (mirror / 'tools/unused/tl-unused.cwl').exists(), "only what the workflow refers to"
+    assert remote.dependencies(mirror / 'workflows/nested/1.0/wf-nested.cwl').missing == []
+
+
+def test_references_out_of_the_remote_folder_are_told_not_copied(remote, pipeline):
+    folder = add(remote, 'vci', str(pipeline / 'workflows' / 'end_to_end'))['folder']
+    mirror = open_levels(remote, folder, '1.0.2')
+    needs = remote.dependencies(mirror / '1.0.2' / 'wf-end_to_end.cwl')
+    assert needs.missing == [] and len(needs.outside) == 2
+    assert needs.outside[0].endswith('/tools/echo/1.0/tl-echo.cwl'), needs.outside
+    done = {}
+    remote.fetchDependencies(mirror / '1.0.2' / 'wf-end_to_end.cwl', lambda result, error: done.update(result=result, error=error))
+    wait_until(lambda: done)
+    assert done['result'].fetched == 0 and len(done['result'].outside) == 2
+
+
+def test_a_file_that_does_not_exist_on_the_machine_stays_missing(remote, pipeline):
+    (pipeline / 'tools/echo/1.0/tl-echo.cwl').unlink()
+    folder = add(remote, 'vci', str(pipeline))['folder']
+    mirror = open_levels(remote, folder, 'workflows', 'workflows/end_to_end', 'workflows/end_to_end/1.0.2')
+    done = {}
+    remote.fetchDependencies(mirror / 'workflows/end_to_end/1.0.2/wf-end_to_end.cwl', lambda result, error: done.update(result=result, error=error))
+    wait_until(lambda: done)
+    assert done['result'].missing == ['tools/echo/1.0/tl-echo.cwl'] and done['result'].fetched == 1
+
+
+def test_a_workflow_of_a_remote_folder_opens_with_its_tools(window, pipeline, caplog):
+    """The error that was reported: "undefined reference to .../tools/samtools/..." because the tools were not copied."""
+    window.remote.transportFor = lambda host: rf.LocalTransport()
+    folder = add(window.remote, 'vci', str(pipeline))['folder']
+    mirror = open_levels(window.remote, folder, 'workflows', 'workflows/end_to_end', 'workflows/end_to_end/1.0.2')
+    window.addWorkspaceFolder(folder.mirror)
+    target = mirror / 'workflows/end_to_end/1.0.2/wf-end_to_end.cwl'
+    assert not (mirror / 'tools').exists() or not list((mirror / 'tools').rglob('*.cwl'))
+    with caplog.at_level('CRITICAL'):
+        window.openDocument(str(target), host=window)
+        wait_until(lambda: any(getattr(doc, 'file_path', None) and Path(str(doc.file_path)).name == target.name
+                               for doc in window.open_windows.values()), message="the workflow did not open")
+        pump(10)
+    document = next(doc for doc in window.open_windows.values() if getattr(doc, 'file_path', None) and Path(str(doc.file_path)).name == target.name)
+    assert not [r for r in caplog.records if r.levelname == 'CRITICAL'], [r.getMessage()[:200] for r in caplog.records]
+    assert (mirror / 'tools/echo/1.0/tl-echo.cwl').is_file() and (mirror / 'tools/uppercase/2.0/tl-uppercase.cwl').is_file()
+    assert sorted(step.id.split('#')[-1].split('/')[-1] for step in document.cwl_tool.steps) == ['echo', 'uppercase']
+    assert 'Reading the 2 files' not in window.statusBar().currentMessage(), "the message goes away when they are here"
+    # the second time nothing is read: the files are here
+    window.remote.transportFor = lambda host: FailingTransport()
+    count = len(window.open_windows)
+    window.openDocument(str(target), host=window)
+    pump(4)
+    assert len(window.open_windows) == count, "an open document is only brought forward"
+
+
+def test_a_workflow_whose_tools_cannot_be_read_says_why_and_opens_anyway(window, pipeline, monkeypatch):
+    window.remote.transportFor = lambda host: rf.LocalTransport()
+    folder = add(window.remote, 'vci', str(pipeline))['folder']
+    mirror = open_levels(window.remote, folder, 'workflows', 'workflows/end_to_end', 'workflows/end_to_end/1.0.2')
+    warnings = []
+    monkeypatch.setattr(QMessageBox, 'warning', lambda parent, title, text, *args, **kwargs: warnings.append((title, text)))
+    window.remote.transportFor = lambda host: FailingTransport()
+    window.openDocument(str(mirror / 'workflows/end_to_end/1.0.2/wf-end_to_end.cwl'), host=window)
+    wait_until(lambda: warnings)
+    assert warnings[0][0] == 'Open from Remote' and 'no route to host' in warnings[0][1]
+    assert 'wf-end_to_end.cwl refers to files that are not on this computer' in warnings[0][1]
+    wait_until(lambda: any(getattr(doc, 'file_path', None) for doc in window.open_windows.values()), message="it is opened anyway")
+
+
+def test_a_workflow_that_refers_out_of_the_folder_says_so(window, pipeline, monkeypatch):
+    window.remote.transportFor = lambda host: rf.LocalTransport()
+    folder = add(window.remote, 'vci', str(pipeline / 'workflows' / 'end_to_end'))['folder']
+    mirror = open_levels(window.remote, folder, '1.0.2')
+    warnings = []
+    monkeypatch.setattr(QMessageBox, 'warning', lambda parent, title, text, *args, **kwargs: warnings.append((title, text)))
+    window.openDocument(str(mirror / '1.0.2' / 'wf-end_to_end.cwl'), host=window)
+    assert warnings and 'outside the remote folder' in warnings[0][1] and 'Add the folder that contains them' in warnings[0][1]

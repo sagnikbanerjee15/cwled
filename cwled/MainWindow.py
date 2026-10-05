@@ -114,6 +114,7 @@ class MainWindow(WorkbenchWindow):
         self.remote.syncFailed.connect(self.onRemoteSyncFailed)
         self.remote.levelFetched.connect(self.onRemoteFolderRead)
         self.remote.levelFailed.connect(self.onRemoteFolderFailed)
+        self.remote.dependenciesFetched.connect(self.onRemoteDependenciesFetched)
         self.remote.uploaded.connect(self.onRemoteUploaded)
         self.remote.uploadFailed.connect(self.onRemoteUploadFailed)
         theme.notifier.themeChanged.connect(self._refreshThemeMenus)
@@ -836,7 +837,45 @@ class MainWindow(WorkbenchWindow):
         Open a file as a tab of ``host`` (by default the window the user works in).
         If the file is already open, in whichever window, that tab is brought forward.
         With ``recent`` False the file is not added to the recent files.
+
+        A document of the copy of a remote folder may refer to files (the tools of a workflow) that were not
+        copied yet, because folders are read when they are opened: these are copied first, and then the document is opened.
         '''
+        folder = self.remote.folderFor(input_file)
+        if folder is None:
+            return self._openDocumentNow(input_file, host, recent)
+        needs = self.remote.dependencies(input_file)
+        if not needs.missing:
+            self._warnAboutReferences(input_file, needs, None)
+            return self._openDocumentNow(input_file, host, recent)
+        count = len(needs.missing)
+        self.activeHost().statusBar().showMessage(
+            f"Reading the {count} file{'s' if count != 1 else ''} that {Path(input_file).name} refers to from {folder.label} ...", 0)
+
+        def copied(result, error):
+            self.activeHost().statusBar().clearMessage()
+            self._warnAboutReferences(input_file, result if error is None else needs, error)
+            self._openDocumentNow(input_file, host, recent)
+
+        self.remote.fetchDependencies(input_file, copied)
+
+    def _warnAboutReferences(self, input_file: str, needs, error):
+        """Say, before a document is opened, which files it refers to that are not here, and why (it would fail with an obscure message)."""
+        name = Path(input_file).name
+        if error is not None:
+            text = f"{name} refers to files that are not on this computer and could not be read from the remote machine:\n\n{error}"
+        elif needs.missing:
+            shown = ", ".join(needs.missing[:5]) + (f" and {len(needs.missing) - 5} more" if len(needs.missing) > 5 else "")
+            text = f"{name} refers to files that do not exist in the remote folder: {shown}."
+        elif needs.outside:
+            shown = "\n".join(needs.outside[:5]) + (f"\nand {len(needs.outside) - 5} more" if len(needs.outside) > 5 else "")
+            text = (f"{name} refers to files outside the remote folder that was added, which cannot be copied:\n\n{shown}\n\n"
+                    "Add the folder that contains them (a parent folder of this one) as a remote folder.")
+        else:
+            return
+        QMessageBox.warning(self._dialogParent(), "Open from Remote", text + "\n\nThe document is opened anyway; it may not load.")
+
+    def _openDocumentNow(self, input_file:str, host:WorkbenchWindow=None, recent:bool=True):
         # Check if the file is already open in an existing window
         resolved_path = str(Path(input_file).resolve())
         for window in self.open_windows.values():
@@ -1197,6 +1236,11 @@ class MainWindow(WorkbenchWindow):
                 f"{folder.label}{self._remoteSubfolder(folder, local_dir)}: {result.summary()}", 5000)
         for window in self.workbenchWindows():
             window.sidebar.workspace_panel.reloadDirectory(local_dir)
+
+    def onRemoteDependenciesFetched(self, document: str, result):
+        """Files that a document refers to were copied: they show in the Workspace panels."""
+        for window in self.workbenchWindows():
+            window.sidebar.workspace_panel.refresh()
 
     def onRemoteFolderFailed(self, local_dir: str, why: str):
         self.activeHost().statusBar().showMessage(f"A folder of a remote machine could not be read: {why.splitlines()[0] if why else ''}", 10000)

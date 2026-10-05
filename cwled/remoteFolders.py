@@ -38,6 +38,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, List, Optional, Tuple
+from urllib.parse import unquote, urlsplit
 
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal
 
@@ -47,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 SUFFIXES = ('.cwl', '.yml', '.yaml', '.json')       # the files that are copied
 MAX_FILE_BYTES = 2 * 1024 * 1024                    # larger files are not copied
+MAX_DEPENDENCY_ROUNDS = 12                          # how many times, at most, files are asked for to follow what documents refer to
 MAX_ENTRIES = 5000                                  # a folder with more documents and folders is cut here
 CONNECT_TIMEOUT = 15
 CONFIG_KEY = 'remote_folders'
@@ -241,13 +243,36 @@ def pullLevels(transport: Transport, remote_path: str, folders: List[str], mirro
     the newer one wins: a file that was changed here and could not be uploaded is kept, and a file
     that was changed on the remote machine since is copied.
     """
+    wanted = ['.' if not folder else './' + folder.strip('/') for folder in folders if '\n' not in folder]
+    return _pull(transport, remote_path, _levelScript(remote_path), wanted, mirror, None)
+
+
+def pullFiles(transport: Transport, remote_path: str, files: List[str], mirror: Path) -> PullResult:
+    """
+    Copy some files of a remote folder into ``mirror`` whatever their suffix (the files that a workflow
+    refers to: its tools, what it imports or includes). ``files`` are relative to ``remote_path``; one that
+    does not exist on the machine is left out.
+    """
+    wanted = [file.strip('/') for file in files if '\n' not in file and file.strip('/')]
+    return _pull(transport, remote_path, _filesScript(remote_path), wanted, mirror, set(wanted))
+
+
+def _filesScript(path: str) -> str:
+    """The script that sends the files it is given on its input (relative to ``path``, one per line), if they exist."""
+    return (f'cd -- {remoteExpr(path)} >/dev/null || exit 3\n'
+            f'list=$(while IFS= read -r f; do [ -f "./$f" ] && printf "%s\\n" "./$f"; done)\n'
+            f'[ -n "$list" ] || exit 0\n'
+            f'printf "%s\\n" "$list" | tar -chf - --no-recursion -T -\n')
+
+
+def _pull(transport: Transport, remote_path: str, script: str, wanted: List[str], mirror: Path,
+          allowed: Optional[set]) -> PullResult:
     result = PullResult()
     mirror = Path(mirror)
     mirror.mkdir(parents=True, exist_ok=True)
     root = mirror.resolve()
-    wanted = ['.' if not folder else './' + folder.strip('/') for folder in folders if '\n' not in folder]
     with tempfile.TemporaryFile() as errors:
-        process = transport.popen(_levelScript(remote_path), stdin=subprocess.PIPE, stderr=errors)
+        process = transport.popen(script, stdin=subprocess.PIPE, stderr=errors)
         count = 0
         try:
             try:
@@ -262,7 +287,7 @@ def pullLevels(transport: Transport, remote_path: str, folders: List[str], mirro
                         if count > MAX_ENTRIES:
                             result.truncated = True
                             break
-                        _extractMember(archive, member, root, result)
+                        _extractMember(archive, member, root, result, allowed)
             except tarfile.ReadError as e:
                 if 'empty' not in str(e).lower():
                     raise RemoteError(f"{transport.describe()} did not send a list of files ({e}). Does a "
@@ -289,7 +314,8 @@ def _inside(path: Path, root: Path) -> bool:
     return resolved == root or root in resolved.parents
 
 
-def _extractMember(archive: tarfile.TarFile, member: tarfile.TarInfo, root: Path, result: PullResult):
+def _extractMember(archive: tarfile.TarFile, member: tarfile.TarInfo, root: Path, result: PullResult,
+                   allowed: Optional[set] = None):
     relative = _safeRelativePath(member.name)
     if relative is None:
         result.skipped.append(member.name)
@@ -302,7 +328,9 @@ def _extractMember(archive: tarfile.TarFile, member: tarfile.TarInfo, root: Path
         target.mkdir(parents=True, exist_ok=True)
         result.folders += 1
         return
-    if (not member.isreg() or not str(relative).lower().endswith(SUFFIXES) or member.size > MAX_FILE_BYTES
+    # a file that was asked for by name may have any suffix, otherwise only documents are taken
+    named = str(relative) in allowed if allowed is not None else str(relative).lower().endswith(SUFFIXES)
+    if (not member.isreg() or not named or member.size > MAX_FILE_BYTES
             or not _inside(target.parent, root) or target.is_symlink()):
         result.skipped.append(member.name)       # not a plain document, or a link in the copy that leads elsewhere
         return
@@ -337,6 +365,62 @@ def pushFile(transport: Transport, local: Path, remote_path: str):
               f'if [ -e "$p" ]; then cp -p -- "$p" "$tmp" || exit 4; fi\n'
               f'cat > "$tmp" && mv -f -- "$tmp" "$p" || {{ rm -f -- "$tmp"; exit 5; }}\n')
     transport.run(script, stdin=body, timeout=120)
+
+
+# ------------------------------------------------------------------------------------------------ what a document refers to
+REFERENCE_KEYS = ('run', '$import', '$include', '$mixin')
+
+
+def documentReferences(path: Path) -> List[str]:
+    """
+    The files that a CWL document refers to, as it writes them: the ``run`` of its steps (a tool or a workflow)
+    and what it imports, includes or mixes in. Nothing for a file that is not a document (or cannot be read).
+    """
+    try:
+        from ruamel.yaml import YAML
+        document = YAML(typ='safe').load(Path(path).read_text(encoding='utf-8', errors='replace'))
+    except Exception:
+        return []
+    found: List[str] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in REFERENCE_KEYS and isinstance(value, str):
+                    found.append(value)
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(document)
+    return found
+
+
+def referencedPath(document: Path, reference: str) -> Optional[str]:
+    """
+    Where a reference leads, as a normalised path (no ``..``) without looking at the disk: relative to the document that
+    has it, without the ``#fragment``, a ``file:`` URL as the path it names. None for what is no file (``#id``, ``http:``).
+    """
+    reference = reference.strip()
+    if not reference or reference.startswith('#'):
+        return None
+    parts = urlsplit(reference)
+    if parts.scheme not in ('', 'file'):
+        return None
+    path = unquote(parts.path if parts.scheme == 'file' else reference.split('#', 1)[0])
+    if not path:
+        return None
+    candidate = path if os.path.isabs(path) else os.path.join(os.fspath(Path(document).parent), path)
+    return os.path.normpath(candidate)
+
+
+@dataclass
+class Dependencies:
+    """The files that a document needs (what it refers to, and what those refer to)."""
+    missing: List[str] = field(default_factory=list)    # in the remote folder but not in the copy: relative to the copy
+    outside: List[str] = field(default_factory=list)    # outside the remote folder: they cannot be copied
+    fetched: int = 0                                    # files copied from the machine for it
 
 
 # ------------------------------------------------------------------------------------------------ the folders
@@ -403,6 +487,7 @@ class RemoteFolders(QObject):
     syncFailed = pyqtSignal(str, str)            # the copy that could not be refreshed, why
     levelFetched = pyqtSignal(str, object)       # a folder of a copy was read (the local folder, a PullResult)
     levelFailed = pyqtSignal(str, str)           # a folder of a copy could not be read, why
+    dependenciesFetched = pyqtSignal(str, object)   # files that a document refers to were copied (the document, Dependencies)
     uploaded = pyqtSignal(str, str)              # the file, where it went (label of the remote file)
     uploadFailed = pyqtSignal(str, str)          # the file, why
 
@@ -597,6 +682,75 @@ class RemoteFolders(QObject):
     def syncAll(self):
         for folder in self._folders:
             self.sync(folder.mirror)
+
+    def dependencies(self, local_path) -> Dependencies:
+        """
+        What a document of a copy refers to (its steps' tools, what it imports...), and what those refer to in turn,
+        that is not in the copy yet (``missing``: relative to the copy) or cannot be (``outside``: it leads out of
+        the remote folder). Only the disk is looked at.
+        """
+        found = Dependencies()
+        folder = self.folderFor(local_path)
+        if folder is None:
+            return found
+        mirror = Path(folder.mirror).resolve()
+        remote_root = folder.path.rstrip('/')
+        missing, outside, seen = set(), set(), set()
+        queue = [Path(local_path).resolve()]
+        while queue:
+            document = queue.pop()
+            if document in seen:
+                continue
+            seen.add(document)
+            for reference in documentReferences(document):
+                target = referencedPath(document, reference)
+                if target is None:
+                    continue
+                if target == remote_root or target.startswith(remote_root + '/'):    # written as a path on the machine
+                    target = os.path.join(str(mirror), target[len(remote_root):].lstrip('/'))
+                try:
+                    relative = Path(target).relative_to(mirror)
+                except ValueError:
+                    outside.add(target)
+                    continue
+                if Path(target).is_file():
+                    if target.lower().endswith(SUFFIXES):
+                        queue.append(Path(target))                  # what it refers to is needed too
+                else:
+                    missing.add(relative.as_posix())
+        found.missing, found.outside = sorted(missing), sorted(outside)
+        return found
+
+    def fetchDependencies(self, local_path, callback: Callable[[Optional[Dependencies], Optional[Exception]], None]):
+        """
+        Copy what a document refers to and is not here (a workflow opened from a remote folder needs its tools, which
+        are in folders that were not read): a few rounds, because what is copied may refer to more files.
+        ``callback(dependencies, error)`` tells what is still missing (it does not exist on the machine) or why not.
+        """
+        folder = self.folderFor(local_path)
+        if folder is None:
+            callback(Dependencies(), None)
+            return
+
+        def work():
+            transport = self.transportFor(folder.host)
+            asked, fetched = set(), 0
+            for _round in range(MAX_DEPENDENCY_ROUNDS):
+                needed = [name for name in self.dependencies(local_path).missing if name not in asked]
+                if not needed:
+                    break
+                asked.update(needed)
+                fetched += pullFiles(transport, folder.path, needed, Path(folder.mirror)).files
+            result = self.dependencies(local_path)
+            result.fetched = fetched
+            return result
+
+        def done(result, error):
+            if error is None and result.fetched:
+                self.dependenciesFetched.emit(str(local_path), result)
+            callback(result, error)
+
+        self.submit(work, done)
 
     def upload(self, local_path) -> bool:
         """Write a file of a copy on the remote machine. False if the file is not in a copy."""

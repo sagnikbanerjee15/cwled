@@ -626,13 +626,23 @@ Back up `~/.ssh/config` before editing it for these checks.
 - [ ] **O-30** 🖥 With a workflow of the remote folder open, click the **name** of a step or switch tabs (the panel follows the open document) → the file is shown in the panel without any reading from the instance (the status bar shows no "Reading …").
 - [ ] **O-31** The **search** of the panel finds documents of the folders you opened, not of the ones you never opened (known limitation: they are not on your computer yet).
 
+### Opening a workflow: the tools it refers to
+
+- [ ] **O-32** 🖥 Add a remote folder that is a repository of pipelines (workflows in `workflows/…`, tools in `tools/…`, the workflows referring to the tools with `run: ../../../tools/…`). Expand only `workflows/<name>/<version>` and **double-click the workflow** → the status bar
+      says *Reading the N files that … refers to from host:/…*, the workflow opens **with its steps** (no "undefined reference to file:///…/tools/…" error, which is what this used to give), and `tools/…` now shows in the panel with the tools it uses.
+- [ ] **O-33** Open the same workflow again after closing it → no "Reading…" message (the tools are here). Open a workflow that refers to a **sub-workflow** that refers to tools → all of them are copied (a few rounds), and it opens.
+- [ ] **O-34** 🖥 On the instance rename one of the tools, open the workflow → a message says the workflow refers to files that do not exist in the remote folder (names them); the workflow opens anyway and its load error names the same file.
+- [ ] **O-35** 🖥 Turn Wi-Fi off, open a workflow whose tools were never copied → a message says the files could not be read from the remote machine, with the `ssh` error; the workflow opens anyway. A workflow whose tools are already here opens without any message.
+- [ ] **O-36** 🖥 Add as remote folder only `…/workflows` of a repository whose tools are in the sibling `tools/` folder, open a workflow → a message says it refers to files **outside** the remote folder (it lists some) and to add a parent folder; add the parent folder → it opens with its tools.
+- [ ] **O-37** Tools, **Validate** and the other commands on a workflow opened this way work (they need the tools on disk); **Save** uploads only the workflow (and the status bar says so), the tools that were copied are not uploaded unless you change them.
+
 ### Afterwards
 
 - [ ] **O-19** Quit and start CWLed again → the remote root is still there with its `host:/path` name, and saving a document of it still uploads.
 - [ ] **O-20** Right-click the remote root → **Remove from Workspace** → the root goes away; the copy is still on the disk (macOS: `~/Library/Application Support/cwled/remote/<host>/…`). Add the same remote folder again → it reuses that copy
       (a file you changed and could not upload is still there).
 - [ ] **O-21** A **detached window** (section **B**) shows the same `host:/path` name for the root; **+ Add a Remote Folder (SSH)** in the side panel of the detached window adds the folder to *that window's* workspace; a document of it saved in either window is uploaded.
-- [ ] **O-22** A workflow in the remote folder whose steps are other files of the same remote folder (`run: tools/x.cwl`) opens with its steps, and clicking the name of a step reveals the tool in the remote root (section **D**).
+- [ ] **O-22** A workflow in the remote folder whose steps are other files of the same remote folder (`run: tools/x.cwl`) opens with its steps (see **O-32**: the tools are copied when it is opened), and clicking the name of a step reveals the tool in the remote root (section **D**).
 - [ ] **O-23** All five themes: the dialog, the hosts table, the red error line and the server icon of the root are readable in each (View → Theme).
 - [ ] **O-24** `remote_folders` in the user configuration file lists the folders (host, path, mirror, synced); delete the entry by hand and start again → the root keeps its folder but is no longer named `host:/path` and no longer uploads.
 

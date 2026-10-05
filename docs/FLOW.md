@@ -845,6 +845,16 @@ pullLevels() of that folder → levelFetched → WorkspaceContents.reloadDirecto
 (WorkspaceContents.remote_unfetched = RemoteFolders.isUnfetched makes such a folder listed although it is empty here;
  revealFile() never reads folders: it is navigation, not the user opening them)
 
+Opening a document of a copy (MainWindow.openDocument)
+    ↓
+RemoteFolders.dependencies(file)   documentReferences(): the run / $import / $include / $mixin of the document, then of the
+                                   files that are here, resolved with referencedPath(); missing = in the remote folder, not here
+    ↓ missing?  (status bar: "Reading the N files that ... refers to ...")
+RemoteFolders.fetchDependencies()  rounds of pullFiles() (the files named, any suffix) until nothing more is missing
+    ↓
+dependenciesFetched → the panels refresh;  _warnAboutReferences(): files that do not exist, an unreachable machine, references
+outside the remote folder;  then MainWindow._openDocumentNow() (always: the document is opened even if it may not load)
+
 Sync from Remote → RemoteFolders.sync() → pullLevels() again for the first level and the folders that were read:
 where a file differs on both sides the newer wins
 ```
