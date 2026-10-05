@@ -1,9 +1,12 @@
+from PyQt6 import sip
 from PyQt6.QtCore import *
 from PyQt6.QtWidgets import *
-from PyQt6.QtGui import QAction, QIcon, QFont, QColor, QFontMetrics, QUndoStack
+from PyQt6.QtGui import QAction, QIcon, QFont, QColor, QFontMetrics, QUndoStack, QPainter, QPen, QPixmap
 import json
 import builtins
 import data
+import theme
+import GraphItems
 import logging
 from NetworkGraph import CWLGraph
 from CWLparser import Parser
@@ -15,6 +18,7 @@ from typing import Any,Union, Optional
 from cwl_utils_handler import get_cwl_module,get_cwl_version
 from cwl_utils.parser import save
 from GraphNodes import StepNode
+from StepInspector import StepInspector
 from ports import PortSplitter
 
 class WorkflowEditor(QWidget):
@@ -84,6 +88,12 @@ class WorkflowEditor(QWidget):
         Filters events from watched objects. We use this to capture when
         the graph viewer loses focus.
         """
+        if sip.isdeleted(self):
+            # being destroyed: Qt still delivers its dying children's events here
+            return False
+        if watched is getattr(self, '_canvas', None) and event.type() in (
+                QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop):
+            return self._canvasDrop(event)
         if event.type() == QEvent.Type.FocusOut:
             # Check if the widget that lost focus is the graph viewer
             if watched is self.graph.graph.viewer():
@@ -95,6 +105,36 @@ class WorkflowEditor(QWidget):
         # Pass the event on to the parent class
         return super().eventFilter(watched, event)
 
+
+    @staticmethod
+    def _cwlFiles(mime_data) -> list:
+        """The CWL documents (local files) being dragged."""
+        if not mime_data.hasUrls():
+            return []
+        return [url.toLocalFile() for url in mime_data.urls()
+                if url.isLocalFile() and url.toLocalFile().lower().endswith(('.cwl', '.json', '.yaml', '.yml'))
+                and os.path.isfile(url.toLocalFile())]
+
+    def _canvasDrop(self, event) -> bool:
+        """Accept CWL files over the canvas and add them as steps where dropped."""
+        files = self._cwlFiles(event.mimeData())
+        if not files:
+            event.ignore()
+            return True         # nothing else can be dropped on the canvas
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        if event.type() == QEvent.Type.Drop:
+            viewer = self.graph.graph.viewer()
+            position = viewer.mapToScene(event.position().toPoint())
+            # after the drag has finished (adding may ask questions)
+            QTimer.singleShot(0, lambda: self._addDroppedSteps(files, position))
+        return True
+
+    def _addDroppedSteps(self, files: list, position: QPointF):
+        for index, cwl_file in enumerate(files):
+            offset = 60 * index
+            self.onAddStep(cwl_file=cwl_file, position=QPointF(position.x() + offset, position.y() + offset))
+        self.graph.graph.viewer().setFocus()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -125,7 +165,7 @@ class WorkflowEditor(QWidget):
 
     def createLegendItem(self, color, label):
         """
-        Create a legend item with a colored square and label.
+        Create a legend item with a node swatch and label.
         
         Args:
             color (tuple): RGB color tuple (r, g, b)
@@ -139,16 +179,24 @@ class WorkflowEditor(QWidget):
         item_layout.setContentsMargins(0, 0, 10, 0)
         item_layout.setSpacing(5)
         
-        # Create color square
+        # Node swatch: a small cwl-svg node (grey ring around the fill colour)
         color_square = QLabel()
         color_square.setFixedSize(16, 16)
-        color_square.setStyleSheet(f"""
-            QLabel {{
-                background-color: rgb({color[0]}, {color[1]}, {color[2]});
-                border: 1px solid rgba(128, 128, 128, 0.5);
-                border-radius: 2px;
-            }}
-        """)
+        color_square.setStyleSheet("padding: 0; border: none;")
+        ratio = color_square.devicePixelRatioF()
+        pixmap = QPixmap(int(16 * ratio), int(16 * ratio))
+        pixmap.setDevicePixelRatio(ratio)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(QColor(*theme.GRAPH['edge'][:3]), 1.5))
+        painter.setBrush(QColor(*theme.GRAPH['background'][:3]))
+        painter.drawEllipse(QPointF(8, 8), 7, 7)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(*color[:3]))
+        painter.drawEllipse(QPointF(8, 8), 7 * GraphItems.INNER_RATIO, 7 * GraphItems.INNER_RATIO)
+        painter.end()
+        color_square.setPixmap(pixmap)
         
         # Create label
         text_label = QLabel(label)
@@ -185,46 +233,28 @@ class WorkflowEditor(QWidget):
         # Create the buttons
         self.add_step_btn = QPushButton("Add Step")
         self.duplicate_step_btn = QPushButton("Duplicate Step")
-        self.reset_plot_btn = QPushButton("Reset Plot")
-        self.export_image_btn = QPushButton("Export Image")
         
-        # Style the buttons
-        for btn in [self.add_step_btn, self.duplicate_step_btn, self.export_image_btn , self.reset_plot_btn]:
+        # Style the buttons (Composer control buttons)
+        for btn, glyph in [(self.add_step_btn, 'plus'), (self.duplicate_step_btn, 'files-o')]:
             btn.setMinimumWidth(100)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #f0f0f0;
-                    border: 1px solid #c0c0c0;
-                    border-radius: 4px;
-                    padding: 5px 10px;
-                }
-                QPushButton:hover {
-                    background-color: #e0e0e0;
-                }
-                QPushButton:pressed {
-                    background-color: #d0d0d0;
-                }
-            """)
+            btn.setIcon(theme.icon(glyph, color=theme.TEXT))
         
         # Connect button signals to slots
         self.add_step_btn.clicked.connect(self.onAddStep)
         self.duplicate_step_btn.clicked.connect(self.onDuplicateStep)
-        self.export_image_btn.clicked.connect(self.onExportImage)
-        self.reset_plot_btn.clicked.connect(self.onResetPlot)
         
         # Add buttons to the buttons layout
         buttons_layout.addWidget(self.add_step_btn)
         buttons_layout.addWidget(self.duplicate_step_btn)
-        buttons_layout.addWidget(self.reset_plot_btn)
-        buttons_layout.addWidget(self.export_image_btn)
+        buttons_layout.addStretch()
         
         # Create legend widget
         legend_widget = QWidget()
-        legend_widget.setStyleSheet("""
-            QWidget {
-                border-top: 1px solid rgba(128, 128, 128, 0.4);
+        legend_widget.setStyleSheet(f"""
+            QWidget {{
+                border-top: 1px solid {theme.BLACK};
                 padding: 5px;
-            }
+            }}
         """)
         legend_main_layout = QVBoxLayout(legend_widget)
         legend_main_layout.setContentsMargins(0, 5, 0, 5)
@@ -239,8 +269,8 @@ class WorkflowEditor(QWidget):
         input_label = QLabel("Inputs:")
         input_label.setStyleSheet("font-weight: bold; font-size: 11px; min-width: 60px;")
         input_layout.addWidget(input_label)
-        input_layout.addWidget(self.createLegendItem((0, 102, 204), "Required"))
-        input_layout.addWidget(self.createLegendItem((190, 225, 255), "Optional"))
+        input_layout.addWidget(self.createLegendItem(theme.GRAPH['io'], "Required"))
+        input_layout.addWidget(self.createLegendItem(theme.GRAPH['io_optional'], "Optional"))
         input_layout.addStretch()
         
         # Row 2: Outputs
@@ -252,8 +282,8 @@ class WorkflowEditor(QWidget):
         output_label = QLabel("Outputs:")
         output_label.setStyleSheet("font-weight: bold; font-size: 11px; min-width: 60px;")
         output_layout.addWidget(output_label)
-        output_layout.addWidget(self.createLegendItem((40, 167, 69), "Required"))
-        output_layout.addWidget(self.createLegendItem((210, 245, 210), "Optional"))
+        output_layout.addWidget(self.createLegendItem(theme.GRAPH['io'], "Required"))
+        output_layout.addWidget(self.createLegendItem(theme.GRAPH['io_optional'], "Optional"))
         output_layout.addStretch()
         
         # Row 3: Steps
@@ -265,8 +295,8 @@ class WorkflowEditor(QWidget):
         step_label = QLabel("Steps:")
         step_label.setStyleSheet("font-weight: bold; font-size: 11px; min-width: 60px;")
         step_layout.addWidget(step_label)
-        step_layout.addWidget(self.createLegendItem((128, 128, 128), "Normal"))
-        step_layout.addWidget(self.createLegendItem((150, 110, 200), "Conditional"))
+        step_layout.addWidget(self.createLegendItem(theme.GRAPH['step'], "Normal"))
+        step_layout.addWidget(self.createLegendItem(theme.GRAPH['step_conditional'], "Conditional"))
         step_layout.addStretch()
         
         # Add all rows to the legend layout
@@ -292,9 +322,9 @@ class WorkflowEditor(QWidget):
                 margin: 5px 10px 5px 10px;
             }
             QLabel:hover {
-                border-color: #007acc;
-                background-color: rgba(0, 122, 204, 0.15);
-                color: #007acc;
+                border-color: #6aaaf0;
+                background-color: rgba(106, 170, 240, 0.12);
+                color: #6aaaf0;
             }
         """)
         
@@ -324,8 +354,42 @@ class WorkflowEditor(QWidget):
         # self.graph.connection_created.connect( self.onGraphChanged)
         # self.graph.node_created.connect(self.onGraphChanged)
         self.graph.editingFinished.connect( self.onGraphChanged )
-        # Add the graph to the layout, taking all remaining space
-        main_layout.addWidget(self.graph, 1)  # The 1 gives this widget a stretch factor
+
+        # Composer step inspector, docked on the right of the canvas: steps
+        # double-clicked on the canvas open there instead of in a dialog
+        self.step_inspector = StepInspector(self.graph, parent=self)
+        self.graph.inspect_step = self.step_inspector.inspect
+        self.splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self.splitter.setObjectName('inspectorSplitter')
+        self.splitter.setHandleWidth(6)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.addWidget(self.graph)
+        self.splitter.addWidget(self.step_inspector)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 0)
+        self.splitter.setSizes([10000, StepInspector.DEFAULT_WIDTH])
+        # Add the canvas to the layout, taking all remaining space
+        main_layout.addWidget(self.splitter, 1)  # The 1 gives this widget a stretch factor
+
+        # Tools and workflows dragged from the Workspace panel (or a file
+        # manager) onto the canvas become steps where they are dropped.
+        # OdenGraphQt would otherwise try to import them as graph sessions.
+        viewer = self.graph.graph.viewer()
+        try:
+            viewer.data_dropped.disconnect(self.graph.graph._on_node_data_dropped)
+        except (TypeError, RuntimeError):
+            pass
+        self._canvas = viewer.viewport()
+        self._canvas.installEventFilter(self)
+
+        # Composer's canvas buttons: delete, zoom, fit, auto-arrange, export
+        self.graph_controls = GraphItems.GraphControls(
+            self.graph.graph_widget,
+            self.graph.graph,
+            on_delete=self.graph.deleteSelection,
+            on_arrange=self.onResetPlot,
+            on_export=self.onExportImage,
+        )
 
         
         # Set the layout for this widget
@@ -344,8 +408,8 @@ class WorkflowEditor(QWidget):
         
         viewer = self.graph.graph.viewer()
         scene = viewer.scene()
-        # Use itemsBoundingRect to get the actual content bounds
-        rect = scene.itemsBoundingRect()
+        # Bounds of the drawn graph (hidden helper items left out)
+        rect = GraphItems.contentRect(scene)
         # Add some padding around the content
         padding = 20
         rect.adjust(-padding, -padding, padding, padding)
@@ -579,8 +643,8 @@ class WorkflowEditor(QWidget):
 
         viewer = self.graph.graph.viewer()
         scene = viewer.scene()
-        # Use itemsBoundingRect to get the actual content bounds
-        rect = scene.itemsBoundingRect()
+        # Bounds of the drawn graph (hidden helper items left out)
+        rect = GraphItems.contentRect(scene)
         # Add some padding around the content
         padding = 20
         rect.adjust(-padding, -padding, padding, padding)
@@ -658,6 +722,7 @@ class WorkflowEditor(QWidget):
         self.getNodeCoordinates()
         self.graph.makeGraph()
         self.graph.showGraph()
+        self.step_inspector.graphRebuilt()
         
     def generateUniqueStepID(self, new_step_id: str) -> str:
         """
@@ -705,10 +770,13 @@ class WorkflowEditor(QWidget):
         cwl_file=files[0]
         return cwl_file if cwl_file else None
             
-    def onAddStep(self, cwl_file: Optional[str] = None):
+    def onAddStep(self, cwl_file: Optional[str] = None, position: Optional[QPointF] = None):
         """
         Handle Add Step button click - opens a file dialog to select a CWL file and creates a new step node
         based on that file with the proper input and output ports according to CWL v1.2 specification
+
+        ``position``: scene position of the new step (a file dropped on the
+        canvas): it is placed there and the other nodes stay where they are.
         """
         
         self.logger.info(f"Adding Step to workflow")
@@ -723,6 +791,9 @@ class WorkflowEditor(QWidget):
                 return
             
         self.logger.debug(f"Selected CWL file: {cwl_file}")
+        if self.file_location and Path(cwl_file).resolve() == Path(self.file_location).resolve():
+            QMessageBox.warning(self, "Add Step", "A workflow cannot be a step of itself.")
+            return
         module=get_cwl_module( self.cwl_workflow.cwlVersion)
         try:
             # Parse the selected CWL file
@@ -792,17 +863,32 @@ class WorkflowEditor(QWidget):
             if not self.cwl_workflow.steps:
                 self.cwl_workflow.steps=[]
             self.cwl_workflow.steps.append(step_data)
-            
+
+            if position is not None:
+                # keep every node where it is, the new one goes where it was dropped
+                self.getNodeCoordinates()
+                self.node_coordinates[step_data.id] = {'x': position.x(), 'y': position.y()}
+
             # Update the  CWL dictionary in the graph before making the graph
             self.graph.setCWL(self.cwl_workflow)
             self.graph.makeGraph()
-            self.graph.showGraph()
-            # os.chdir( cwd )
-            # Ensure proper placement of inputs and outputs after adding a new step
-            try:
-                self.graph.arrange_inputs_outputs(force_all=False)
-            except Exception as e:
-                self.logger.warning(f"Error arranging inputs/outputs after adding step: {str(e)}")
+            if position is not None:
+                self.setNodeCoordinates()
+                node = self.graph.graph.get_node_by_name(step_data.id)
+                if node is not None:
+                    # centred on the drop point
+                    x = position.x() - node.view.width / 2
+                    y = position.y() - node.view.height / 2
+                    node.set_pos(x, y)
+                    self.node_coordinates[step_data.id] = {'x': x, 'y': y}
+                self.graph.graph.viewer().update()
+            else:
+                self.graph.showGraph()
+                # Ensure proper placement of inputs and outputs after adding a new step
+                try:
+                    self.graph.arrange_inputs_outputs(force_all=False)
+                except Exception as e:
+                    self.logger.warning(f"Error arranging inputs/outputs after adding step: {str(e)}")
 
 
         #     # Display information to the user
@@ -914,12 +1000,13 @@ class WorkflowEditor(QWidget):
         """
         Add a requirement of the specified class to the workflow if it is not already present.
         """
-        if not hasattr(self.cwl_workflow, 'requirements'):
+        if getattr(self.cwl_workflow, 'requirements', None) is None:
             self.cwl_workflow.requirements = []
         
         # Check if the requirement is already present
         for req in self.cwl_workflow.requirements:
-            if req.class_ == requirement_class:
+            req_class = req.get('class') if isinstance(req, dict) else getattr(req, 'class_', None)
+            if req_class == requirement_class:
                 self.logger.debug(f"Requirement {requirement_class} already present in workflow.")
                 return  # Requirement already exists
         

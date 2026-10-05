@@ -22,6 +22,8 @@ import sys
 from typing import Union, Any,List,Optional
 from copy import deepcopy
 import data
+import theme
+import GraphItems
 from jinja2 import Environment, FileSystemLoader
 import os
 from cwl_utils.parser import save
@@ -57,7 +59,8 @@ class CWLNode(BaseNode):
  
 
     def __init__(self):
-        super().__init__()
+        # drawn as a cwl-svg (Rabix Composer) node
+        super().__init__(qgraphics_item=GraphItems.CWLNodeItem)
         self.set_property('width',500)
         self.logger=logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(data.configuration.get('logLevel',{}).get(self.__class__.__name__, 'DEBUG'))
@@ -76,6 +79,22 @@ class CWLNode(BaseNode):
         self.logger_splitports=logging.getLogger(f"{self.__class__.__name__}_splitports")
         self.logger_splitports.setLevel(data.configuration.get('logLevel',{}).get(f"{self.__class__.__name__}_splitports", 'DEBUG'))
 
+
+    def applyNodeColors(self, fill):
+        """Fill the node's inner circle with a cwl-svg colour."""
+        self.set_color(*fill[:3])
+
+    def ioGlyph(self, direction):
+        """cwl-svg icon of a workflow input or output: a file icon for
+        File and File[] parameters (GraphNode.makeIconFragment)."""
+        type_ = getattr(self.cwl_step, 'type_', None)
+        if isinstance(type_, list):
+            types = [t for t in type_ if t != 'null']
+            type_ = types[0] if len(types) == 1 else None
+        if getattr(type_, 'type_', None) == 'array':
+            type_ = getattr(type_, 'items', None)
+        is_file = isinstance(type_, str) and type_.split('#')[-1] == 'File'
+        return f"file_{direction}" if is_file else direction
 
     def draw_rectangle_port(self, painter, rect, info):
         """
@@ -260,44 +279,21 @@ class CWLNode(BaseNode):
             self.create_property('title', base_title)
         if not self.has_property('full_title'):
             self.create_property('full_title', base_title)
-
-        # Calculate the maximum characters that fit based on node width and font size
-        if hasattr(self, 'view') and self.view and hasattr(self.view, 'text_item'):
-            # Get the current font from the text item
-            font = self.view.text_item.font()
-            font_size = data.configuration.get("graph_node", {}).get('label_font_size', 12)
-            font.setPointSize(font_size)
-            
-            # Use QFontMetrics to calculate average character width
-            from PyQt6.QtGui import QFontMetrics
-            font_metrics = QFontMetrics(font)
-            
-            # Get node width (with some padding for margins)
-            node_width = self.get_property('width') 
-            padding = 40  # Account for node padding/margins
-            available_width = node_width - padding
-            
-            # Calculate how many characters fit
-            # Use average character width for estimation
-            avg_char_width = font_metrics.averageCharWidth()
-            if avg_char_width > 0:
-                user_width = max(10, int(0.9 * available_width / avg_char_width)) 
-            else:
-                user_width = self.get_property('user_width')  # Fallback default
-            
-            if len(base_title) > user_width:
-                self.set_property('title', base_title[:user_width - 2] + '..')
-            else:
-                self.set_property('title', base_title)
-
-            self.view.text_item.setToolTip(self.get_property('full_title'))
-            # print(f"\n\nfont_size {font_size}\nnode_width {node_width}\navailable_width {available_width}\navg_char_width {avg_char_width}\nuser_width {user_width}\n\n")
-            # print(f"properties {self.properties()}")
-            # print(f"\n\n==== the title {self.get_property('title')} for node {self.name()}\n\n ")
         else:
-            # Fallback if view is not available yet
-            self.set_property('title', base_title)
-        
+            self.set_property('full_title', base_title)
+
+        # The label sits under the node (cwl-svg): elide only very long titles
+        from PyQt6.QtGui import QFontMetricsF
+        font_metrics = QFontMetricsF(GraphItems.font())
+        title = base_title
+        if font_metrics.horizontalAdvance(title) > GraphItems.LABEL_MAX_WIDTH:
+            while title and font_metrics.horizontalAdvance(title + '..') > GraphItems.LABEL_MAX_WIDTH:
+                title = title[:-1]
+            title += '..'
+        self.set_property('title', title)
+        if hasattr(self, 'view') and self.view:
+            self.view.setToolTip(self.get_property('full_title') if title != base_title else '')
+
         self.updateNodeDisplay()
 
     def renameReferenceOfConnectedNode(self, old_ref:str, new_ref:str):
@@ -752,10 +748,10 @@ class CWLNode(BaseNode):
             # Get required status, handle both object and dict
             required = not is_optional(port)
             
-            # Set color to green
-            color = (9, 180, 9) 
+            # cwl-svg port colours: light grey, darker when optional
+            color = theme.GRAPH['port']
             if not required:
-                color= (80, 100, 80)
+                color = theme.GRAPH['io_optional']
             # if the port has a pick value we make it grayer
             # if hasattr(port, 'pickValue') and port.pickValue:
             #     color =  # Muted grayish-green
@@ -951,13 +947,16 @@ class InputNode(CWLNode,  QObject):
         self.simplifyName()
         self.add_output('source', display_name=False)
         
-        self.set_color(0, 102, 204)#(177, 86, 15)
+        self.applyNodeColors(theme.GRAPH['io'])
+        self.view.setGlyph('input')
         
 
     def setCWL(self, cwl_step: Any = None):
         if type(cwl_step).__name__ not in ['WorkflowInputParameter','InputParameter']:
             raise TypeError(f"Expected WorkflowInputParameter, got {type(cwl_step).__name__}")
-        return super().setCWL(cwl_step)
+        result = super().setCWL(cwl_step)
+        self.view.setGlyph(self.ioGlyph('input'))
+        return result
 
     def createOutputTooltip(self, port):
         """Create tooltip for output port."""
@@ -978,9 +977,9 @@ class InputNode(CWLNode,  QObject):
         if hasattr(self.getCWL(), 'doc') and self.getCWL().doc:
             tooltip_lines.append(f"Description: {self.getCWL().doc}")
         if is_optional( self.getCWL() ):
-            self.set_color(190, 225, 255)#(217, 116, 55)
+            self.applyNodeColors(theme.GRAPH['io_optional'])
         else:
-            self.set_color(0, 102, 204)#(177, 86, 15)
+            self.applyNodeColors(theme.GRAPH['io'])
         return "\n".join(tooltip_lines)
 
 
@@ -1088,16 +1087,19 @@ class OutputNode(CWLNode,QObject):
             self.logger.setLevel("DEBUG")
         self.create_property('worklow_output_id', self.id)
         self.add_input( 'sink', multi_input=True, display_name=False)
-        self.set_color(40, 167, 69)
+        self.applyNodeColors(theme.GRAPH['io'])
+        self.view.setGlyph('output')
         
     def setCWL(self, cwl_step: Any = None):
         if type(cwl_step).__name__ not in ['WorkflowOutputParameter']:
             raise TypeError(f"Expected WorkflowOutputParameter, got {type(cwl_step).__name__}")
         if is_optional( cwl_step ):
-            self.set_color(210, 245, 210)#(82, 190, 188)
+            self.applyNodeColors(theme.GRAPH['io_optional'])
         else:
-            self.set_color(40, 167, 69)#(42, 170, 138)
-        return super().setCWL(cwl_step)
+            self.applyNodeColors(theme.GRAPH['io'])
+        result = super().setCWL(cwl_step)
+        self.view.setGlyph(self.ioGlyph('output'))
+        return result
     
     def createInputTooltip(self, port):
         """Create tooltip for input port."""
@@ -1457,16 +1459,18 @@ class StepNode(CWLNode, QObject):
         """
 
         super().loadTool()
-            # Set appearance based on tool class
+        # cwl-svg icons: workflow and command line tool steps only
         if self.cwl_tool.class_ == 'Workflow':
-            self.set_icon(data.configuration.get('icons').get('workflow') )
+            self.view.setGlyph('workflow')
             self.is_workflow = True
+        elif self.cwl_tool.class_ == 'CommandLineTool':
+            self.view.setGlyph('tool')
         else:
-            self.set_icon(data.configuration.get('icons').get('tool') )
+            self.view.setGlyph(None)
         if hasattr(self.cwl_step, 'when') and self.cwl_step.when:
-            self.set_color(150, 110, 200)#(25, 25, 112)  
+            self.applyNodeColors(theme.GRAPH['step_conditional'])
         else:
-            self.set_color(128, 128, 128)
+            self.applyNodeColors(theme.GRAPH['step'])
         self.logger.debug(f"For StepNode: {self.name()} - class {self.cwl_tool.class_}")
         
         self.addInputs()
@@ -1749,18 +1753,27 @@ class StepNode(CWLNode, QObject):
             >>> step.renameReferenceOfSelfID("step1", "myNewStep")
             >>> # After: input ID is now "myNewStep/input1"
         """
+        def renamed(port_id):
+            # keep the document part of full ids (file:///wf.cwl#step/port)
+            d=self.splitPort( port_id )
+            if d.node != old_ref:
+                return port_id
+            new_port=f"{new_ref}/{d.port_id}"
+            return f"{d.filename}#{new_port}" if d.filename else new_port
+
         for i in self.cwl_step.in_: #source is a WorkflowStepInput
-            d=self.splitPort( i.id )
-            if d.node == old_ref:
-                new_port=f"{new_ref}/{d.port_id}"
-                i.id=new_port
+            i.id=renamed( i.id )
         
-        for o in self.cwl_step.out: #source is a WorkflowStepOutput
-            d=self.splitPort( o.id )
-            if d.node == old_ref:
-                new_port=f"{new_ref}/{d.port_id}"
-                o.id=new_port
-        
+        outputs=[]
+        for o in self.cwl_step.out: # a WorkflowStepOutput or its id
+            output_id = renamed( o if isinstance(o, str) else o.id )
+            if isinstance(o, str):
+                outputs.append(output_id)
+            else:
+                o.id=output_id
+                outputs.append(o)
+        self.cwl_step.out=outputs
+
         self.set_name(new_ref)
 
     def getCWLTool(self):

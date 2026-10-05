@@ -15,7 +15,7 @@ from OdenGraphQt import (
 )
 import uuid
 from OdenGraphQt import SubGraph
-from OdenGraphQt.constants import PipeLayoutEnum
+from OdenGraphQt.constants import PipeLayoutEnum, ViewerEnum
 from OdenGraphQt.qgraphics.port import PortItem  # Add this import
 from OdenGraphQt.qgraphics.node_base import NodeItem
 from OdenGraphQt.qgraphics.pipe import LivePipePolygonItem
@@ -24,6 +24,8 @@ from configuration import Configuration
 import builtins
 import sys
 import data
+import theme
+import GraphItems
 import os
 import re
 from typing import Union, Any
@@ -32,7 +34,10 @@ from GraphNodes import InputNode,OutputNode,StepNode
 from cwl_utils.parser import save
 from cwl_utils_handler import get_cwl_module, get_cwl_version
 from GraphNodes import CWLNode, PortSplitter
+from StepInspector import FILE_KINDS, SBG_NAMESPACE, isExposed, portType, shortId
+from PyQt6 import sip
 from OdenGraphQt import constants as cc
+logger = logging.getLogger(__name__)
 cc.WIDTH=400
 NODE_INPUT_WIDTH=70
 NODE_OUTPUT_WIDTH=70
@@ -90,6 +95,13 @@ class CWLGraph(QWidget):
         self.logger_makeedges=logging.getLogger(f"{self.__class__.__name__}_makeedges")
         self.logger_makeedges.setLevel(data.configuration.get('logLevel',{}).get(f"{self.__class__.__name__}_makeedges", 'DEBUG'))
 
+        # Composer shows a step input port on the canvas when it is a required
+        # File, when it is connected, or when it was shown from the step
+        # inspector: the ports shown that way, by step node name
+        self.shown_ports = {}
+        # Opens a step node in the workflow editor's step inspector (None: StepDialog)
+        self.inspect_step = None
+
         # Initialize the cwl_dict as an empty dictionary if none provided
         self.setCWL(cwl_workflow )
         # Set the base directory for all CWLNodes to resolve relative paths
@@ -127,6 +139,11 @@ class CWLGraph(QWidget):
 
 
         self.graph.set_pipe_style(PipeLayoutEnum.CURVED.value) #PipeLayoutEnum.ANGLE.value
+        # cwl-svg "rabix-dark" canvas: plain dark background, no grid
+        self.graph.set_background_color(*theme.GRAPH['background'])
+        self.graph.set_grid_color(*theme.GRAPH['grid'])
+        self.graph.set_grid_mode(ViewerEnum.GRID_DISPLAY_NONE.value)
+        GraphItems.install(self.graph)
         self.graph_widget = self.graph.widget
         # Create the layout for the graph widget
         self.graph_layout = QVBoxLayout(self)
@@ -140,7 +157,7 @@ class CWLGraph(QWidget):
         self.graph.node_double_clicked.connect(self.onNodeDoubleClicked)
         self.graph.port_connected.connect(self.onPortConnected)
         self.graph.port_disconnected.connect(self.onPortDisconnected) 
-        self.graph.context_menu_prompt.connect(lambda *args, **kwargs: print("[SIGNAL] context_menu_prompt emitted"))
+        self.graph.context_menu_prompt.connect(lambda *args, **kwargs: logger.debug("[SIGNAL] context_menu_prompt emitted"))
         if cwl_workflow: 
             self.logger.debug(f"Provided the workflow cwl {self.cwl_workflow.id} as { json.dumps(save(self.cwl_workflow))[:150]} ...")
             self.makeGraph(
@@ -151,6 +168,21 @@ class CWLGraph(QWidget):
             self.logger.debug("The canvas is empty")
 
         self.showGraph()
+
+    def editor(self):
+        """The workflow editor holding the graph (its node coordinates), even
+        when the graph sits in a splitter next to the step inspector."""
+        widget = self.parentWidget()
+        while widget is not None and not hasattr(widget, 'node_coordinates'):
+            widget = widget.parentWidget()
+        return widget if widget is not None else self.parentWidget()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # frame the workflow once the canvas is shown at its real size
+        if not getattr(self, '_framed', False):
+            self._framed = True
+            QTimer.singleShot(0, lambda: GraphItems.fitToViewport(self.graph))
 
     def eventFilter(self, obj, event):
         """Handle mouse events for drag-to-create functionality."""
@@ -173,7 +205,7 @@ class CWLGraph(QWidget):
         # Handle key press events for deletion
         elif event.type() == QEvent.Type.KeyPress:
             if event.key() == Qt.Key.Key_Delete or event.key() == Qt.Key.Key_Backspace:
-                self.onNodeDeleted()
+                self.deleteSelection()
                 return True  # Event handled
 
         elif event.type() == QEvent.Type.GraphicsSceneMousePress:
@@ -204,16 +236,16 @@ class CWLGraph(QWidget):
                     not any([ isinstance( x , NodeItem) for x in items_at_pos] ) ) or 
                     item is None):
                     create_node=True    
-                print(f"Create node: {create_node}")
+                logger.debug(f"Create node: {create_node}")
                 # Handle output port drag (existing functionality)
                 if self.dragging_output_port and create_node:
-                    print(f"Creating output node from drag")
+                    logger.debug(f"Creating output node from drag")
                     # print("--- [EVENT_FILTER] Decided to create an Output node.")
                     node=self.createOutputNodeFromDrag(event.scenePos())
                     
                 # Handle input port drag (new functionality)
                 elif self.dragging_input_port and create_node:
-                    print(f"Creating input node from drag")
+                    logger.debug(f"Creating input node from drag")
                     # print("--- [EVENT_FILTER] Decided to create an Input node.")
                     node=self.createInputNodeFromDrag(event.scenePos())
 
@@ -600,9 +632,9 @@ class CWLGraph(QWidget):
         self.graph.clear_selection()
         self.graph.toggle_node_search()
 
-        if hasattr(self.parent(), 'node_coordinates') and self.parent().node_coordinates:
+        if hasattr(self.editor(), 'node_coordinates') and self.editor().node_coordinates:
             self.logger.debug(f"We will get the coordinates from the parent object")
-            # self.parent().setNodeCoordinates()
+            # self.editor().setNodeCoordinates()
             try:
                 self.arrange_inputs_outputs(force_all=True)
             except Exception:
@@ -615,7 +647,7 @@ class CWLGraph(QWidget):
             except Exception as e:
                 pass
             self.graph.clear_selection()
-            self.graph.fit_to_selection()
+            GraphItems.fitToViewport(self.graph)
 
     def makeGraph(self, 
                   cwl_workflow:Any=None,
@@ -669,10 +701,10 @@ class CWLGraph(QWidget):
             self.logger.info(f"Adding step {step.id} to the graph")
             self.logger.debug(f"Creating new step node for step with id {step.id}")
             x=y=0
-            if hasattr( self.parent(), 'node_coordinates') and self.parent().node_coordinates:
+            if hasattr( self.editor(), 'node_coordinates') and self.editor().node_coordinates:
                 try:
-                    x=self.parent().node_coordinates.get(step.id).get('x')
-                    y=self.parent().node_coordinates.get(step.id).get('y')
+                    x=self.editor().node_coordinates.get(step.id).get('x')
+                    y=self.editor().node_coordinates.get(step.id).get('y')
                 except:
                     pass
             node=self.graph.create_node( 
@@ -714,10 +746,10 @@ class CWLGraph(QWidget):
                     self.graph.delete_node(existing_node)
             self.logger.info(f"Adding input {input.id} to the graph")
             x=y=0
-            if hasattr( self.parent(), 'node_coordinates') and self.parent().node_coordinates:
+            if hasattr( self.editor(), 'node_coordinates') and self.editor().node_coordinates:
                 try:
-                    x=self.parent().node_coordinates.get(input.id).get('x')
-                    y=self.parent().node_coordinates.get(input.id).get('y')
+                    x=self.editor().node_coordinates.get(input.id).get('x')
+                    y=self.editor().node_coordinates.get(input.id).get('y')
                 except:
                     pass
             node=self.graph.create_node( 
@@ -750,10 +782,10 @@ class CWLGraph(QWidget):
                     self.graph.delete_node(existing_node)
             self.logger.info(f"Adding output {output.id} to the graph")
             x=y=0
-            if hasattr( self.parent(), 'node_coordinates') and self.parent().node_coordinates:
+            if hasattr( self.editor(), 'node_coordinates') and self.editor().node_coordinates:
                 try:
-                    x=self.parent().node_coordinates.get(output.id).get('x')
-                    y=self.parent().node_coordinates.get(output.id).get('y')
+                    x=self.editor().node_coordinates.get(output.id).get('x')
+                    y=self.editor().node_coordinates.get(output.id).get('y')
                 except:
                     pass
             node=self.graph.create_node( 
@@ -789,6 +821,7 @@ class CWLGraph(QWidget):
         finally:
             self.graph.port_connected.connect(self.onPortConnected)
             self.graph.port_disconnected.connect(self.onPortDisconnected)
+        self.refreshPortVisibility()
 
     def clear( self):
         """
@@ -811,7 +844,8 @@ class CWLGraph(QWidget):
         minimum_step_gap = 24
         step_column_tolerance = max(NODE_STEP_WIDTH, 25)
 
-        input_nodes = [n for n in self.graph.all_nodes() if n.type_ == 'cwled.input.InputNode']
+        input_nodes = [n for n in self.graph.all_nodes() if n.type_ == 'cwled.input.InputNode'
+                       and not self.isHiddenInput(n)]
         output_nodes = [n for n in self.graph.all_nodes() if n.type_ == 'cwled.output.OutputNode']
         step_nodes = [n for n in self.graph.all_nodes() if n.type_ == 'cwled.step.StepNode']
         
@@ -1006,6 +1040,7 @@ class CWLGraph(QWidget):
         
         # # Emit our custom signal with the connection information
         self.logger_makeedges.info('\U0001F6A8 New Port created - updating the network')
+        self._scheduleVisibilityRefresh()
         self.editingFinished.emit()
         
 
@@ -1036,9 +1071,10 @@ class CWLGraph(QWidget):
             self.logger_makeedges.info(f"Updated CWL for target node '{target_node.name()}' to remove source for port '{target_port_name}'.")
         else:
             self.logger_makeedges.warning(f"Node type {type(target_node).__name__} does not have a 'removeInputSource' method.")
-            
+
 
         # Emit the signal to indicate the graph has been edited.
+        self._scheduleVisibilityRefresh()
         self.editingFinished.emit()
 
 
@@ -1119,47 +1155,230 @@ class CWLGraph(QWidget):
         """
         
         self.logger.debug(f"Double-click detected on node: {node.name()} (type: {type(node).__name__})")
-        
+
+        # Composer opens steps in the object inspector beside the canvas
+        if isinstance(node, StepNode) and self.inspect_step is not None:
+            self.inspect_step(node)
+            return
+
         # Check if the node has its own double-click handler
         if hasattr(node, 'onNodeDoubleClicked'):
             self.logger.debug(f"Calling double-click handler for node: {node.name()}")
             old_id=node.getCWL().id
             node.onNodeDoubleClicked(node)
-            new_id = node.getCWL().id
-            if old_id != new_id:
-                resolved_step_id = self.resolveWorkflowStepIDCollision(
-                    changed_kind='step',
-                    changed_id=new_id
-                )
-                if resolved_step_id != new_id:
-                    node.getCWL().id = resolved_step_id
-                    new_id = resolved_step_id
-
-                self.logger.info(f"Node renamed from {old_id} to {new_id}. Updating references.")
-                
-                node.renameReferenceOfSelfID(old_id, new_id)
-                
-                # find the nodes that are connected to this node
-                # and update the references to the id of this node
-                input_connected = node.connected_input_nodes()
-                output_connected = node.connected_output_nodes()
-                self.logger.info(f"Input connected {input_connected}")
-                self.logger.info(f"Output connected {output_connected}")
-                
-                nodes_to_change=[]
-                for input_nodes in list(input_connected.values()) + list(output_connected.values()): # this returns the list of nodes connected to each port.
-                    nodes_to_change.extend( input_nodes )
-                nodes_to_change=list(set(nodes_to_change))
-
-                self.logger.info(f"This node is referenced in {nodes_to_change}. We will update them")
-                
-                for n in nodes_to_change:
-                    # change the references in these nodes.
-                    n.renameReferenceOfConnectedNode( old_id, new_id )
-            self.editingFinished.emit()
-                
+            self.nodeEdited(node, old_id)
         else:
             self.logger.warning(f"Node {node.name()} does not have a double-click handler")
+
+    def nodeEdited(self, node, old_id: str):
+        """
+        Update the graph after the CWL of ``node`` was edited: when its ID
+        changed (it was ``old_id``) the references to it are renamed.
+        """
+        new_id = node.getCWL().id
+        if old_id != new_id:
+            resolved_step_id = self.resolveWorkflowStepIDCollision(
+                changed_kind='step',
+                changed_id=new_id
+            )
+            if resolved_step_id != new_id:
+                node.getCWL().id = resolved_step_id
+                new_id = resolved_step_id
+
+            self.logger.info(f"Node renamed from {old_id} to {new_id}. Updating references.")
+            
+            node.renameReferenceOfSelfID(old_id, new_id)
+            
+            # find the nodes that are connected to this node
+            # and update the references to the id of this node
+            input_connected = node.connected_input_nodes()
+            output_connected = node.connected_output_nodes()
+            self.logger.info(f"Input connected {input_connected}")
+            self.logger.info(f"Output connected {output_connected}")
+            
+            nodes_to_change=[]
+            for input_nodes in list(input_connected.values()) + list(output_connected.values()): # this returns the list of nodes connected to each port.
+                nodes_to_change.extend( input_nodes )
+            nodes_to_change=list(set(nodes_to_change))
+
+            self.logger.info(f"This node is referenced in {nodes_to_change}. We will update them")
+            
+            for n in nodes_to_change:
+                # change the references in these nodes.
+                n.renameReferenceOfConnectedNode( old_id, new_id )
+            if old_id in self.shown_ports:
+                self.shown_ports[new_id] = self.shown_ports.pop(old_id)
+        self.editingFinished.emit()
+
+    # -- Composer step ports (shown / hidden, default / exposed / port) ---------
+    def toolInput(self, node, port_name: str):
+        """The input of the step's tool behind ``port_name`` (None for an
+        input of the step only, e.g. one used by ``when``)."""
+        tool = node.getCWLTool() if hasattr(node, 'getCWLTool') else None
+        for parameter in (getattr(tool, 'inputs', None) or []):
+            if shortId(parameter.id) == port_name:
+                return parameter
+        return None
+
+    @staticmethod
+    def isHiddenInput(node) -> bool:
+        """Workflow inputs exposed from the step inspector are not drawn."""
+        return node.type_ == 'cwled.input.InputNode' and isExposed(node.getCWL())
+
+    def _shownByDefault(self, node, port_name: str) -> bool:
+        """Composer always shows the ports of required File and Directory inputs
+        (and the step's own inputs, which only exist to be connected)."""
+        parameter = self.toolInput(node, port_name)
+        if parameter is None:
+            return True
+        port_type = portType(getattr(parameter, 'type_', None))
+        return not port_type.nullable and (port_type.kind in FILE_KINDS or port_type.items in FILE_KINDS)
+
+    def refreshPortVisibility(self):
+        """Show the step ports and workflow inputs Composer shows on the canvas."""
+        for node in self.graph.all_nodes():
+            if node.type_ == 'cwled.input.InputNode':
+                visible = not self.isHiddenInput(node)
+                if node.view.isVisible() != visible:
+                    node.set_property('visible', visible, push_undo=False)
+        for node in self.graph.get_nodes_by_type('cwled.step.StepNode'):
+            shown = self.shown_ports.setdefault(node.name(), set())
+            for port_name, port in node.inputs().items():
+                connected = any(not self.isHiddenInput(p.node()) for p in port.connected_ports())
+                if connected:
+                    shown.add(port_name)        # stays shown when disconnected, like Composer
+                visible = connected or port_name in shown or self._shownByDefault(node, port_name)
+                port.set_visible(visible, push_undo=False)
+        for pipe in self.graph.viewer().all_pipes():
+            if pipe.input_port and pipe.output_port:
+                pipe.draw_path(pipe.input_port, pipe.output_port)
+
+    def _scheduleVisibilityRefresh(self):
+        if not getattr(self, '_visibility_pending', False):
+            self._visibility_pending = True
+            QTimer.singleShot(0, self._refreshScheduledVisibility)
+
+    def _refreshScheduledVisibility(self):
+        self._visibility_pending = False
+        if not sip.isdeleted(self):
+            self.refreshPortVisibility()
+
+    def portStatus(self, node, port_name: str) -> str:
+        """Composer WorkflowStepInputModel.status: "port" when the port is on
+        the canvas, "exposed" when it gets its value from a hidden workflow
+        input, "default" otherwise."""
+        port = node.inputs().get(port_name)
+        if port is None:
+            return 'default'
+        if port.visible():
+            return 'port'
+        return 'exposed' if port.connected_ports() else 'default'
+
+    def setPortOption(self, node, port_name: str, option: str):
+        """Composer step inspector port options: "default" (the value is set in
+        the step), "exposed" (a hidden workflow input) or "port" (on the canvas)."""
+        if node.inputs().get(port_name) is None:
+            return
+        if option == 'port':
+            if self.portStatus(node, port_name) == 'exposed':
+                self.clearPort(node, port_name)
+            self.shown_ports.setdefault(node.name(), set()).add(port_name)
+        elif option == 'default':
+            self.clearPort(node, port_name)
+        elif option == 'exposed':
+            self.clearPort(node, port_name)
+            self.exposePort(node, port_name)
+        self.refreshPortVisibility()
+        self.editingFinished.emit()
+
+    def clearPort(self, node, port_name: str):
+        """Disconnect a step input, remove the workflow inputs left unconnected
+        and take the port off the canvas (Composer WorkflowModel.clearPort)."""
+        port = node.inputs()[port_name]
+        sources = [p.node() for p in port.connected_ports()]
+        for source in list(port.connected_ports()):
+            port.disconnect_from(source, push_undo=False)
+        self.shown_ports.get(node.name(), set()).discard(port_name)
+        for source in sources:
+            if source.type_ == 'cwled.input.InputNode' and \
+                    not any(p.connected_ports() for p in source.outputs().values()):
+                if source in self.nodes:
+                    self.nodes.remove(source)
+                self.graph.delete_node(source, push_undo=False)
+
+    def nextAvailableId(self, wanted: str) -> str:
+        """``wanted``, or ``wanted_1``, ``wanted_2``... when it is taken
+        (Composer WorkflowModel.getNextAvailableId)."""
+        taken = {shortId(n.name()) for n in self.graph.all_nodes()}
+        candidate, index = wanted, 1
+        while candidate in taken:
+            candidate = f"{wanted}_{index}"
+            index += 1
+        return candidate
+
+    def exposePort(self, node, port_name: str):
+        """Give a step input its own workflow input, hidden from the canvas and
+        marked ``sbg:exposed`` like Composer does."""
+        parameter = self.toolInput(node, port_name)
+        if parameter is None:
+            return
+        module = get_cwl_module(self.cwl_version)
+        parameter_class = module.InputParameter if self.cwl_version == 'v1.0' else module.WorkflowInputParameter
+        input_type = deepcopy(getattr(parameter, 'type_', None))
+        if portType(input_type).kind == 'stdin':
+            input_type = 'File'
+        self._stripInputBindingsFromType(input_type)
+        input_id = self.nextAvailableId(port_name)
+        input_parameter = parameter_class(
+            id=input_id,
+            type_=input_type,
+            label=getattr(parameter, 'label', None),
+            doc=getattr(parameter, 'doc', None),
+            format=getattr(parameter, 'format', None),
+            secondaryFiles=getattr(parameter, 'secondaryFiles', None),
+            extension_fields={'sbg:exposed': True},
+        )
+        # the document needs Composer's namespace for "sbg:exposed"
+        loading_options = getattr(self.cwl_workflow, 'loadingOptions', None)
+        if loading_options is not None:
+            if loading_options.namespaces is None:
+                loading_options.namespaces = {}
+            loading_options.namespaces.setdefault('sbg', SBG_NAMESPACE)
+
+        input_node = self.graph.create_node(
+            'cwled.input.InputNode',
+            name=input_id,
+            selected=False,
+            pos=[node.x_pos(), node.y_pos()],
+            push_undo=False,
+            width=NODE_INPUT_WIDTH,
+            text_alignment='left')
+        input_node.create_property('user_width', NODE_INPUT_WIDTH)
+        input_node.setWorkflowID(self.cwl_workflow.id)
+        input_node.setWorkflowFilename(self.workflow_file)
+        input_node.setCWL(input_parameter)
+        input_node.setCustomTitle()
+        input_node.inputnodeUpdated.connect(self.onInputNodeUpdated)
+        self.nodes.append(input_node)
+        input_node.set_property('visible', False, push_undo=False)
+        input_node.outputs()['source'].connect_to(node.inputs()[port_name], push_undo=False)
+        self.logger.info(f"Exposed {node.name()}/{port_name} as the workflow input {input_id}")
+
+    def deleteSelection(self):
+        """Delete the selected nodes or, with no node selected, the selected
+        connections (the graph canvas Delete button and key)."""
+        if self.graph.selected_nodes():
+            self.onNodeDeleted()
+            return
+        for pipe in self.graph.viewer().selected_pipes():
+            if not (pipe.input_port and pipe.output_port):
+                continue
+            in_node = self.graph.get_node_by_id(pipe.input_port.node.id)
+            out_node = self.graph.get_node_by_id(pipe.output_port.node.id)
+            in_port = in_node.inputs().get(pipe.input_port.name) if in_node else None
+            out_port = out_node.outputs().get(pipe.output_port.name) if out_node else None
+            if in_port and out_port:
+                in_port.disconnect_from(out_port)
 
     def onNodeDeleted( self):
         """Delete all currently selected nodes from the graph."""
