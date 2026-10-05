@@ -630,7 +630,6 @@ class CWLGraph(QWidget):
 
         self.graph_widget.show()
         self.graph.clear_selection()
-        self.graph.toggle_node_search()
 
         if hasattr(self.editor(), 'node_coordinates') and self.editor().node_coordinates:
             self.logger.debug(f"We will get the coordinates from the parent object")
