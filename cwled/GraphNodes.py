@@ -7,6 +7,7 @@ from PyQt6.QtCore import *
 from PyQt6.QtGui import QFont,QPainter, QColor, QPen, QPolygonF, QTransform
 
 from urllib.parse import urlparse
+from helperFunctions import uriToPath
 from PyQt6.QtCore import Qt, QPointF
 
 
@@ -486,11 +487,7 @@ class CWLNode(BaseNode):
         if not isinstance(filename, (str, Path, PosixPath)):
             raise TypeError(f"Expected str or Path for filename, got {type(filename).__name__}")
         if isinstance(filename, str):
-            pp = urlparse(filename)
-            if pp.scheme:
-                filename = Path(pp.path)
-            else:
-                filename = Path(filename)   
+            filename = Path(uriToPath(filename))
         
         self.workflow_filename=filename
     
@@ -1375,8 +1372,7 @@ class StepNode(CWLNode, QObject):
         # print(f"setCWLFilename run filename is {runfn}")
         if runfn:
             if isinstance(runfn, str):
-                parsed_runfn = urlparse(runfn)
-                runfn_path = parsed_runfn.path if parsed_runfn.scheme else runfn
+                runfn_path = uriToPath(runfn)
 
                 # the runfn_path can either be absolute or relative to the workflow file
                 # if it is absolute we use it as is

@@ -20,6 +20,7 @@ from schema_salad.exceptions import ValidationException
 from cwl_utils_handler import get_cwl_module
 from cwl_fetcher import getFetcher
 from urllib.parse import urlparse
+from helperFunctions import uriToPath
 import inspect
 import uuid
 import re
@@ -103,7 +104,7 @@ class Parser(object):
                     pp=urlparse(input)
                     if bool(pp.scheme) :
                         # print(f"This is a URI, {pp.scheme} for file {pp.path}")
-                        input=Path(pp.path)
+                        input=Path(uriToPath(input))
                     # Check if the file exists
                     potential_path = PosixPath(input)
                     if (potential_path.exists()):
@@ -552,11 +553,7 @@ class Parser(object):
                 if not isinstance(step.run, str):
                     continue
                     
-                parsed=urlparse( step.run)
-                if parsed.scheme:
-                    path=parsed.path
-                else:
-                    path=step.run
+                path=uriToPath(step.run)      # (a folder with a space in its name is in the URI as %20)
                 if os.path.isabs( path ):
                     original_path=Path(path) # this is the abs path of the tool the workflow runs
                 else:
@@ -655,7 +652,7 @@ class Parser(object):
         """
         self.logger.info(f"Loading CWL from existing dict")
         self.logger.info(f"{json.dumps( cwl_dict, indent=3)}")
-        self.path=Path(urlparse( fileuri).path)
+        self.path=Path(uriToPath(fileuri))
         # convert the object to a string and
         # then load it using the cwl_utils parser
         # need to make sure that the ids and the paths are correctly set
@@ -776,7 +773,7 @@ class Parser(object):
             
             # Step.run is a string (file path or URI)
             try:
-                self_fn = urlparse(self.cwl_tool.loadingOptions.fileuri).path
+                self_fn = uriToPath(self.cwl_tool.loadingOptions.fileuri)
                 self_dir = Path(self_fn).parent
                 run_path = self_dir / step.run
                 absolute_path = run_path.resolve()

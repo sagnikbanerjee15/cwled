@@ -21,6 +21,7 @@ from typing import Union, Optional
 from CWLparser import is_optional, get_type, Parser
 from typing import Any
 from urllib.parse import urlparse
+from helperFunctions import uriToPath
 from cwl_utils_handler import get_cwl_module,get_cwl_version
 
 
@@ -352,9 +353,8 @@ class WorkflowSummary( QWidget ):
 
     def _resolve_step_run_path(self, step_run: str, base_dir: Path) -> str:
         file_location = step_run
-        parsed_url = urlparse(step_run)
-        if parsed_url.scheme in ('file',):
-            file_location = parsed_url.path
+        if urlparse(step_run).scheme in ('file',):
+            file_location = uriToPath(step_run)
         return os.path.abspath(os.path.join(base_dir, file_location))
 
     def _extract_step_docker_images(self, step: Any, base_dir: Path) -> set[str]:
@@ -458,10 +458,9 @@ class WorkflowSummary( QWidget ):
                         # External file reference
                         # file_location = os.path.abspath( Path(self.file_location) / Path(step.run))
                         file_location = step.run
-                        parsed_url = urlparse(step.run)
-                        if parsed_url.scheme in ('file'):
+                        if urlparse(step.run).scheme in ('file'):
                             # print("file url detected")
-                            file_location = parsed_url.path
+                            file_location = uriToPath(step.run)
                         file_location = os.path.abspath( os.path.join( base_dir, file_location))
                        
                         

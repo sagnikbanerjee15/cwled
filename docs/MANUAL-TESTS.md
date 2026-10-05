@@ -635,6 +635,7 @@ Back up `~/.ssh/config` before editing it for these checks.
 - [ ] **O-35** 🖥 Turn Wi-Fi off, open a workflow whose tools were never copied → a message says the files could not be read from the remote machine, with the `ssh` error; the workflow opens anyway. A workflow whose tools are already here opens without any message.
 - [ ] **O-36** 🖥 Add as remote folder only `…/workflows` of a repository whose tools are in the sibling `tools/` folder, open a workflow → a message says it refers to files **outside** the remote folder (it lists some) and to add a parent folder; add the parent folder → it opens with its tools.
 - [ ] **O-37** Tools, **Validate** and the other commands on a workflow opened this way work (they need the tools on disk); **Save** uploads only the workflow (and the status bar says so), the tools that were copied are not uploaded unless you change them.
+- [ ] **O-38** 🖥 Open a remote workflow (the copies are kept in `~/Library/Application Support/…`, a folder with a space) and press **Save**: its `run:` paths are as they were (not `…/Application%20Support/…`), the steps show their tools, and the file on the instance still has `../../../tools/…`-style paths.
 
 ### Afterwards
 
@@ -720,6 +721,7 @@ For each edit: **the `*` appears at once**, both in front of the **tab title** a
 - [ ] **R-11** Open a **large** real workflow (dozens of steps): opening, panning, zooming, selecting and the step inspector stay responsive.
 - [ ] **R-12** Quit and relaunch several times with documents open → no crash on quit (see the note in **K-10**), no leftover windows, no zombie process.
 - [ ] **R-13** Logs: look at the log directory (`user_log_path`, shown on the Welcome tab) after a long session → no repeated errors or tracebacks from the new features.
+- [ ] **R-14** A workflow in a **folder with a space, a `%` or an accent in its name** (for example `~/My Pipelines/workflows/…` whose steps run `../../tools/x.cwl`) opens with its steps (no "File does not exist … %20 …" error), clicking a step name finds its tool, and **Save** leaves the `run:` paths as they were.
 
 ---
 

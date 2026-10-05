@@ -735,6 +735,20 @@ def test_a_workflow_of_a_remote_folder_opens_with_its_tools(window, pipeline, ca
     assert len(window.open_windows) == count, "an open document is only brought forward"
 
 
+def test_a_workflow_that_refers_to_files_that_are_not_there_says_which_and_where_to_look(window, pipeline, monkeypatch):
+    window.remote.transportFor = lambda host: rf.LocalTransport()
+    wrong = pipeline / 'workflows/end_to_end/1.0.2/wf-end_to_end.cwl'
+    wrong.write_text(WORKFLOW.replace('../../../tools', '../../tools'))          # one level too few: workflows/tools/...
+    folder = add(window.remote, 'vci', str(pipeline))['folder']
+    mirror = open_levels(window.remote, folder, 'workflows', 'workflows/end_to_end', 'workflows/end_to_end/1.0.2')
+    warnings = []
+    monkeypatch.setattr(QMessageBox, 'warning', lambda parent, title, text, *args, **kwargs: warnings.append((title, text)))
+    window.openDocument(str(mirror / 'workflows/end_to_end/1.0.2/wf-end_to_end.cwl'), host=window)
+    wait_until(lambda: warnings)
+    assert 'do not exist in the remote folder' in warnings[0][1] and 'workflows/tools/echo/1.0/tl-echo.cwl' in warnings[0][1]
+    assert 'relative to the folder of the workflow' in warnings[0][1]
+
+
 def test_a_workflow_whose_tools_cannot_be_read_says_why_and_opens_anyway(window, pipeline, monkeypatch):
     window.remote.transportFor = lambda host: rf.LocalTransport()
     folder = add(window.remote, 'vci', str(pipeline))['folder']

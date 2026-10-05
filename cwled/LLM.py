@@ -14,6 +14,7 @@ import data
 import getpass
 import os
 from urllib.parse import urlparse
+from helperFunctions import uriToPath
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
 from typing import Union, Optional, Any
@@ -416,7 +417,7 @@ class Troubleshoot(BaseLLM):
             # and then load the packed workflow as a string to pass to the LLM
             f=CWLRunner()
             workflow_uri=self.cwl_tool.loadingOptions.fileuri
-            workflow_path=urlparse(workflow_uri).path
+            workflow_path=uriToPath(workflow_uri)
             with tempfile.NamedTemporaryFile(delete=True, suffix=".cwl") as tmp:
                 f.packWorkflow(existing_filename=workflow_path,
                                 filename=tmp.name)

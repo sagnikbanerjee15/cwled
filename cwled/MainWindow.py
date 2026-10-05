@@ -866,7 +866,8 @@ class MainWindow(WorkbenchWindow):
             text = f"{name} refers to files that are not on this computer and could not be read from the remote machine:\n\n{error}"
         elif needs.missing:
             shown = ", ".join(needs.missing[:5]) + (f" and {len(needs.missing) - 5} more" if len(needs.missing) > 5 else "")
-            text = f"{name} refers to files that do not exist in the remote folder: {shown}."
+            text = (f"{name} refers to files that do not exist in the remote folder: {shown}.\n\n"
+                    "The paths of its steps (run:) are relative to the folder of the workflow: check them on the remote machine.")
         elif needs.outside:
             shown = "\n".join(needs.outside[:5]) + (f"\nand {len(needs.outside) - 5} more" if len(needs.outside) > 5 else "")
             text = (f"{name} refers to files outside the remote folder that was added, which cannot be copied:\n\n{shown}\n\n"

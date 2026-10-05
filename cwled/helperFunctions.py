@@ -26,7 +26,22 @@ def getResourcePath() -> Path:
         return Path(__file__).resolve().parent.parent / 'resources'
 
 from typing import Any
+from urllib.parse import unquote, urlparse
 from PyQt6.QtWidgets import QWidget
+
+
+def uriToPath(text: str) -> str:
+    """
+    The path that a ``file:`` URI names, with its %XX undone (``Application%20Support`` is ``Application Support``):
+    ``urlparse(uri).path`` leaves them, and a path built from it does not exist when the folder has a space in its name.
+    The path of a URI with another scheme is as ``urlparse`` gives it, and text without a scheme (a plain path) is returned as it is.
+    """
+    if not isinstance(text, str):
+        return text
+    parsed = urlparse(text)
+    if parsed.scheme == 'file':
+        return unquote(parsed.path)
+    return parsed.path if parsed.scheme else text
 
 def addArrayItem(array:list, value:Any, array_index:int):
     '''

@@ -18,6 +18,7 @@ Every change is applied to the workflow as it is made.
 import json
 import logging
 import os
+from helperFunctions import uriToPath
 import re
 from collections import namedtuple
 from typing import Any, Callable, List, Optional
@@ -581,7 +582,7 @@ class AppInfoTab(_Page):
         run = getattr(step, 'run', None)
         if not isinstance(run, str):
             return "Embedded"
-        path = run[len('file://'):] if run.startswith('file://') else run
+        path = uriToPath(run) if run.startswith('file:') else run
         if workflow_file and os.path.isabs(path):
             try:
                 return os.path.relpath(path, os.path.dirname(str(workflow_file)))

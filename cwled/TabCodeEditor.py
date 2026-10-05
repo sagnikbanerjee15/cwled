@@ -208,12 +208,11 @@ class CodeWindow( QWidget):
         if not uri:
             return False
         try:
-            from urllib.parse import urlparse
+            from helperFunctions import uriToPath
             from pathlib import Path
             import tempfile
 
-            parsed = urlparse(uri)
-            path_str = parsed.path if parsed.scheme else uri
+            path_str = uriToPath(uri)
             if not path_str:
                 return False
 

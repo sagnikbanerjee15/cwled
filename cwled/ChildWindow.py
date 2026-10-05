@@ -41,6 +41,7 @@ from cwl_utils_handler import get_cwl_module, get_cwl_version
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from urllib.parse import urlparse
+from helperFunctions import uriToPath
 from copy import deepcopy
 from ports import PortSplitter
 from gitVersion import GitVersion
@@ -122,11 +123,11 @@ class FileChangeHandler(QObject, FileSystemEventHandler):
         
         # Normalize to a set of absolute file paths
         if isinstance(path, (list, tuple, set)):
-            uris=[ urlparse(x).path for x in path ]
+            uris=[ uriToPath(x) for x in path ]
             
             self._targets = {str(Path(p).resolve()) for p in uris}
         else:
-            uri=urlparse(path).path 
+            uri=uriToPath(path)
             self._targets = {str(Path(uri).resolve())}
         # Keep a weak-ish reference to the window
         # (do not use as QObject parent across threads)
@@ -542,8 +543,7 @@ class ChildWindow(QDialog):
         if not path_text:
             return False
         try:
-            parsed = urlparse(path_text)
-            raw_path = parsed.path if parsed.scheme else path_text
+            raw_path = uriToPath(path_text)
             if not raw_path:
                 return False
             p = Path(raw_path).expanduser()
@@ -565,10 +565,7 @@ class ChildWindow(QDialog):
         path_text = self._coerce_path_text(path_value)
         if not path_text:
             return ""
-        parsed = urlparse(path_text)
-        if parsed.scheme == 'file':
-            return parsed.path
-        return path_text
+        return uriToPath(path_text) if urlparse(path_text).scheme == 'file' else path_text
 
     def setDiffStates(self, states: dict):
         """Mark the steps of the workflow that differ from another one in its graph (see TabDiff)."""
@@ -1350,7 +1347,7 @@ class ChildWindow(QDialog):
                     file_path = str(self.file_path)
                 elif hasattr(self.cwl_tool, 'loadingOptions') and hasattr(self.cwl_tool.loadingOptions, 'fileuri'):
                     file_uri = self.cwl_tool.loadingOptions.fileuri
-                    file_path = urlparse(file_uri).path
+                    file_path = uriToPath(file_uri)
                 
                 # Show the result in a scrollable dialog
                 response_dialog = TroubleshootResponseDialog(
@@ -2511,7 +2508,7 @@ class ChildWindow(QDialog):
         """
         try:
             # get the path from the file uri
-            pp=str(Path(urlparse(path).path))
+            pp=str(Path(uriToPath(path)))
             # get the path of the current workflow
             wp=str(Path(self.file_path).parent.resolve())
             return os.path.abspath( os.path.join( wp , pp ) )
