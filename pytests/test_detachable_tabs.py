@@ -258,3 +258,74 @@ def test_dropping_at_a_screen_edge_snaps_and_windows_can_be_tiled(window):
                                            [m.menu() for m in window.menuBar().actions() if m.text().replace('&', '') == 'Window'][0].actions()]
 
 
+def test_the_session_is_saved_and_restored(window, make_window):
+    saved = []
+
+    class Manager:
+        def saveConfiguration(self, *args, **kwargs):
+            saved.append(True)
+
+        def addRecentFile(self, path):
+            pass
+
+    data.configuration_manager = Manager()
+    docs = open_documents(window, ['echo.cwl', 'uppercase.cwl', '01-hello-world.cwl', '50-workflow.cwl'])
+    window.tabs.detachTab(docs['uppercase.cwl'])
+    window.tabs.detachTab(docs['50-workflow.cwl'])
+    pump(8)
+    d1, d2 = window.detached_windows
+    d1.setGeometry(40, 30, 760, 520)
+    d2.setGeometry(90, 60, 800, 560)
+    d1.openFile(str(FIXTURES / '05-input.cwl'))
+    pump(10)
+    d1.tabs.setCurrentIndex(0)
+    window.tabs.setCurrentIndex(1)
+    pump(3)
+    session = window.sessionData()
+    assert [Path(f).name for f in session['main']['files']] == ['echo.cwl', '01-hello-world.cwl']
+    assert [[Path(f).name for f in e['files']] for e in session['windows']] == [['uppercase.cwl', '05-input.cwl'], ['50-workflow.cwl']]
+
+    window.close()
+    pump(10)
+    assert saved and data.configuration['session']['windows'][0]['files'][0].endswith('uppercase.cwl')
+
+    restored = make_window()          # the next start
+    pump(25)
+    assert titles(restored.tabs) == ['Welcome', 'echo.cwl', '01-hello-world.cwl']
+    assert [titles(w.tabs) for w in restored.detached_windows] == [['uppercase.cwl', '05-input.cwl'], ['50-workflow.cwl']]
+    first, second = restored.detached_windows
+    assert (first.geometry().x(), first.geometry().y(), first.geometry().width()) == (40, 30, 760) and second.geometry().x() == 90
+    assert first.tabs.tabText(first.tabs.currentIndex()) == 'uppercase.cwl'
+    assert restored.tabs.tabText(restored.tabs.currentIndex()) == 'echo.cwl'
+    restored.close()
+    pump(6)
+
+
+def test_files_that_are_gone_are_skipped_and_the_setting_turns_it_off(make_window, tmp_path):
+    keep = tmp_path / 'gone.cwl'
+    shutil.copy(FIXTURES / 'echo.cwl', keep)
+    keep.unlink()
+    data.configuration['session'] = {
+        'main': {'files': [str(keep), str(FIXTURES / 'echo.cwl')], 'current': str(FIXTURES / 'echo.cwl')},
+        'windows': [
+            {'files': [str(keep)], 'geometry': [10, 10, 700, 500], 'workspace': [str(tmp_path)], 'current_folder': str(tmp_path)},
+            {'files': [str(FIXTURES / 'uppercase.cwl')], 'geometry': [-9000, -9000, 700, 500],
+             'workspace': ['/does/not/exist'], 'current_folder': None}]}
+    restored = make_window()
+    pump(25)
+    assert titles(restored.tabs) == ['Welcome', 'echo.cwl']
+    assert [titles(w.tabs) for w in restored.detached_windows] == [['uppercase.cwl']], "a window without a file is not made"
+    geometry = restored.detached_windows[0].geometry()
+    assert geometry.x() > -5000 and geometry.y() > -5000, "a position on no screen is replaced"
+    assert restored.detached_windows[0].workspace.folders() == restored.workspace.folders(), "a workspace that is gone: the main one"
+    restored.close()
+    pump(6)
+
+    data.configuration['restore_session'] = False
+    data.configuration['session'] = {'main': {'files': [str(FIXTURES / 'echo.cwl')], 'current': None}, 'windows': []}
+    off = make_window()
+    pump(15)
+    assert titles(off.tabs) == ['Welcome']
+    off.close()
+    pump(5)
+    assert data.configuration['session'] == {}, "with the setting off nothing is kept"

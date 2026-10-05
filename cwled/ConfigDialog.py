@@ -89,6 +89,11 @@ class ConfigDialog(QDialog):
         default_cwl_version_layout.addWidget(self.default_cwl_version)
         layout.addLayout(default_cwl_version_layout)
         
+        # Reopen the last session
+        self.restore_session_check = QCheckBox("Reopen the documents and windows of the last session at start")
+        self.restore_session_check.setChecked(bool(self.config.get('restore_session', True)))
+        layout.addWidget(self.restore_session_check)
+        
         # Window size settings
         window_size_group = QGroupBox("Window Size")
         window_size_layout = QGridLayout()
@@ -607,6 +612,7 @@ class ConfigDialog(QDialog):
         if hasattr(self, 'default_cwl_version'):
             self.config['default_cwl_version'] = self.default_cwl_version.currentText()
         
+        self.config['restore_session'] = self.restore_session_check.isChecked()
         # Make sure main_window dictionary exists
         if 'main_window' not in self.config:
             self.config['main_window'] = {}

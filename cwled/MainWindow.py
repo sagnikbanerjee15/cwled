@@ -108,6 +108,8 @@ class MainWindow(WorkbenchWindow):
         self.initUI()
 
         QTimer.singleShot(100, self._ensureWindowActive)
+
+        self.restoreSession()
         
         if input_files:
             for idx,input_file in enumerate(input_files):
@@ -578,8 +580,112 @@ class MainWindow(WorkbenchWindow):
             if not sip.isdeleted(window):
                 window.reattachAll()
 
+    # -- session ---------------------------------------------------------------------------------------------
+    def sessionData(self) -> dict:
+        """
+        The documents that are open, by window, to open them again at the next start:
+        the files of the main window and, for every window that tabs were torn off
+        into, its files, position and size and workspace. Documents that were never
+        saved are not part of it.
+        """
+        def describe(window):
+            files, current = [], None
+            for index in range(window.tabs.count()):
+                document = window.tabs.widget(index)
+                path = getattr(document, 'file_path', None) if isinstance(document, ChildWindow) else None
+                if path and Path(path).is_file():
+                    files.append(str(path))
+                    if index == window.tabs.currentIndex():
+                        current = str(path)
+            return {'files': files, 'current': current}
+
+        windows = []
+        for window in self.detached_windows:
+            if sip.isdeleted(window):
+                continue
+            entry = describe(window)
+            if not entry['files']:
+                continue
+            geometry = window.geometry()
+            entry['geometry'] = [geometry.x(), geometry.y(), geometry.width(), geometry.height()]
+            entry['workspace'] = window.workspace.folders()
+            entry['current_folder'] = window.workspace.currentFolder()
+            windows.append(entry)
+        return {'main': describe(self), 'windows': windows}
+
+    def saveSession(self, session: dict):
+        """Keep the session in the configuration (an empty one when the setting is off)."""
+        configuration = data.configuration
+        if configuration is None:
+            return
+        enabled = configuration.get('restore_session', True)
+        configuration['session'] = session if enabled else {}
+        if data.configuration_manager:
+            try:
+                data.configuration_manager.saveConfiguration()
+            except Exception as e:
+                self.logger.error(f"Cannot save the session: {e}")
+
+    def restoreSession(self):
+        """
+        Open the documents of the last session again: in the main window, and in
+        windows of their own, at their old place, for the ones that were torn off.
+        Files that are gone are skipped. The setting ``restore_session`` turns it off.
+        """
+        configuration = data.configuration or {}
+        session = configuration.get('session') or {}
+        if not configuration.get('restore_session', True) or not session:
+            return
+        main = session.get('main') or {}
+        self._restoreDocuments(self, main.get('files'), main.get('current'))
+        for entry in session.get('windows') or []:
+            files = [f for f in (entry.get('files') or []) if self._fileExists(f)]
+            if not files:
+                continue
+            folders = [f for f in (entry.get('workspace') or []) if Path(f).is_dir()]
+            workspace = workspaceFolders.Workspace(folders or self.workspace.folders(), entry.get('current_folder'))
+            window = self._newDetachedWindow(workspace)
+            window.resize(self.size())
+            window.move(self.x() + 40, self.y() + 40)
+            if not self._applyGeometry(window, entry.get('geometry')):
+                self.logger.debug("The saved position of a window is on no screen; it is placed next to the main window")
+            window.show()
+            self._restoreDocuments(window, files, entry.get('current'))
+
+    def _restoreDocuments(self, host: WorkbenchWindow, files, current):
+        for file_path in files or []:
+            if not self._fileExists(file_path):
+                self.logger.info(f"Not reopening {file_path}: it is gone")
+                continue
+            try:
+                self.openDocument(str(file_path), host=host, recent=False)
+            except Exception as e:
+                self.logger.error(f"Cannot reopen {file_path}: {e}")
+        if current:
+            for window in self.open_windows.values():
+                if getattr(window, 'file_path', None) and str(window.file_path) == str(current) \
+                        and DetachableTabWidget.tabsOf(window) is host.tabs:
+                    host.tabs.setCurrentWidget(window)
+
+    @staticmethod
+    def _applyGeometry(window: QWidget, geometry) -> bool:
+        """Put a window at a saved [x, y, width, height] if that is on a screen that exists."""
+        try:
+            rect = QRect(*(int(value) for value in geometry))
+        except (TypeError, ValueError):
+            return False
+        for screen in QGuiApplication.screens():
+            available = screen.availableGeometry()
+            if available.intersects(rect):
+                rect.setWidth(min(rect.width(), available.width()))
+                rect.setHeight(min(rect.height(), available.height()))
+                window.setGeometry(rect)
+                return True
+        return False
+
     def closeEvent(self, event):
         """Closing the main window closes every document (each may veto it)."""
+        session = self.sessionData()
         for window in list(self.open_windows.values()):
             if isinstance(window, ChildWindow) and not window.close():
                 event.ignore()
@@ -587,6 +693,7 @@ class MainWindow(WorkbenchWindow):
         for window in list(self.detached_windows):
             if not sip.isdeleted(window):
                 window.close()
+        self.saveSession(session)
         super().closeEvent(event)
 
     def setupGlobalErrorDialogLogging(self):
