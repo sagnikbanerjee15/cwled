@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QTreeView,
                             QApplication, QStyledItemDelegate, QStyle, QToolButton,
                             QStyleOptionViewItem, QHeaderView, QMenu)
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QIcon, QColor
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QModelIndex
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QModelIndex, QFileSystemWatcher, QTimer
 from pathlib import Path
 from collections import Counter
 import logging
@@ -13,6 +13,14 @@ from CWLparser import Parser
 from schema_salad.exceptions import ValidationException
 import data
 import theme
+
+# The files the tree lists
+CWL_SUFFIXES = ('.cwl', '.json', '.yaml')
+# Folders that are never listed, nor searched for documents (version control, caches, environments)
+IGNORED_FOLDERS = {'.git', '.hg', '.svn', '__pycache__', 'node_modules', '.venv', 'venv', '.tox'}
+# At most this many folders are watched for changes (the operating systems limit the watches)
+MAX_WATCHED_FOLDERS = 150
+REFRESH_DELAY_MS = 500
 
 # Custom data roles for lazy loading
 ROLE_PATH = Qt.ItemDataRole.UserRole
@@ -85,6 +93,8 @@ class WorkspaceContents(QMainWindow):
     addFolderRequested = pyqtSignal()  # "Add a Folder" was clicked
     removeFolderRequested = pyqtSignal(str)  # "Remove from Workspace" on a workspace folder
     currentFolderChanged = pyqtSignal(str)  # workspace folder of the selected item
+    showHiddenChanged = pyqtSignal(bool)    # the "show hidden folders" setting changed
+    followDocumentChanged = pyqtSignal(bool)  # the "follow the open document" setting changed
     
     def __init__(self, workspace_path=None, parent=None, sidebar=False):
         """
@@ -109,6 +119,22 @@ class WorkspaceContents(QMainWindow):
         self._search_text = ""    # the active search, if any
         self._showing_search = False      # the tree shows search results
         self._full_tree_expanded = None   # expanded folders of the full tree during a search
+        self._revealing = False           # the selection is moved by revealFile(), not by the user
+        configuration = data.configuration or {}
+        self.show_hidden = bool(configuration.get('workspace_show_hidden', False))   # list folders starting with a dot
+        self.follow_document = bool(configuration.get('workspace_follow_document', True))  # select the open document
+        self._cwl_folders = {}            # folder -> does it hold documents (valid until the tree is rebuilt)
+        self._metadata_cache = {}         # file -> ((mtime, size), (class, version, format))
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.directoryChanged.connect(self._onFolderChanged)
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(REFRESH_DELAY_MS)
+        self._refresh_timer.timeout.connect(self.refresh)
+        self._watch_timer = QTimer(self)
+        self._watch_timer.setSingleShot(True)
+        self._watch_timer.setInterval(0)
+        self._watch_timer.timeout.connect(self._syncWatches)
 
         # Unique window identifier
         self.window_id = "WorkspaceContents"
@@ -147,11 +173,67 @@ class WorkspaceContents(QMainWindow):
         self.refresh()
 
     def refresh(self):
-        """Rebuild the tree: the search results while searching, else the folders."""
+        """
+        Rebuild the tree: the search results while searching, else the folders.
+        The folders that were expanded stay expanded, and so do the selection and
+        the scroll position.
+        """
+        self._refresh_timer.stop()
+        self._cwl_folders.clear()
+        selected = self._selectedPath()
+        scroll = self.tree_view.verticalScrollBar().value()
         if self._search_text:
             self.filter_tree_by_name(self._search_text)
         else:
             self.populate_tree()
+        if selected:
+            self._selectPath(selected)
+        self.tree_view.verticalScrollBar().setValue(scroll)
+
+    def _selectedPath(self):
+        index = self.tree_view.currentIndex()
+        return index.siblingAtColumn(0).data(ROLE_PATH) if index.isValid() else None
+
+    def _selectPath(self, path):
+        """Select an entry that is shown (expanded folders only), without it being the user's choice."""
+        index = self._indexOfPath(path, expand=False)
+        if index is not None:
+            self._revealing = True
+            try:
+                self.tree_view.setCurrentIndex(index)
+            finally:
+                self._revealing = False
+
+    # -- settings ----------------------------------------------------------------------------------
+    def _saveSetting(self, key, value):
+        configuration = data.configuration
+        if configuration is None:
+            return
+        configuration[key] = value
+        if data.configuration_manager:
+            try:
+                data.configuration_manager.saveConfiguration()
+            except Exception as e:
+                self.logger.error(f"Cannot save the setting {key}: {e}")
+
+    def setShowHidden(self, show: bool):
+        """List (or not) the folders whose name starts with a dot, such as the ``.steps`` of a repackaged workflow."""
+        show = bool(show)
+        if show == self.show_hidden:
+            return
+        self.show_hidden = show
+        self._saveSetting('workspace_show_hidden', show)
+        self.showHiddenChanged.emit(show)
+        self.refresh()
+
+    def setFollowDocument(self, follow: bool):
+        """Select the file of the open document in the tree (see WorkbenchWindow)."""
+        follow = bool(follow)
+        if follow == self.follow_document:
+            return
+        self.follow_document = follow
+        self._saveSetting('workspace_follow_document', follow)
+        self.followDocumentChanged.emit(follow)
     
     def initUI(self):
         """Initialize the UI components"""
@@ -236,7 +318,9 @@ class WorkspaceContents(QMainWindow):
         self.tree_view.header().setSectionResizeMode(2, self.tree_view.header().ResizeToContents)
         self.tree_view.header().setSectionResizeMode(3, self.tree_view.header().ResizeToContents)
         self.tree_view.expanded.connect(self._on_item_expanded)
-        self.tree_view.collapsed.connect(lambda idx: self.tree_view.resizeColumnToContents(0))
+        self.tree_view.expanded.connect(lambda _index: self._watch_timer.start())
+        self.tree_view.collapsed.connect(lambda _index: self._watch_timer.start())
+        self.tree_view.collapsed.connect(lambda idx: self._fitNameColumn())
 
         # Add search box and button
         search_layout = QHBoxLayout()
@@ -333,6 +417,14 @@ class WorkspaceContents(QMainWindow):
         self.sort_by_time_btn = self._sidebarButton('clock-o', "Sort by date modified (click again to reverse)",
                                                     self.on_sort_by_time)
         rescan_btn = self._sidebarButton('refresh', "Rescan the workspace", self.on_rescan_clicked)
+        self.hidden_btn = self._sidebarButton('eye-slash', "Show the hidden folders (their name starts with a dot)",
+                                              lambda checked: self.setShowHidden(checked), checkable=True)
+        self.hidden_btn.setChecked(self.show_hidden)
+        self.showHiddenChanged.connect(self.hidden_btn.setChecked)
+        self.follow_btn = self._sidebarButton('crosshairs', "Select the open document in the list",
+                                              lambda checked: self.setFollowDocument(checked), checkable=True)
+        self.follow_btn.setChecked(self.follow_document)
+        self.followDocumentChanged.connect(self.follow_btn.setChecked)
         for button in (self.sort_by_name_btn, self.sort_by_time_btn, rescan_btn):
             search_row.addWidget(button)
         main_layout.insertLayout(0, search_row)
@@ -349,6 +441,9 @@ class WorkspaceContents(QMainWindow):
         self.add_folder_link.clicked.connect(self.addFolderRequested)
         add_folder_row.addWidget(self.add_folder_link)
         add_folder_row.addStretch(1)
+        # the settings of the list, here where there is room (the search field needs the width above)
+        add_folder_row.addWidget(self.hidden_btn)
+        add_folder_row.addWidget(self.follow_btn)
         main_layout.insertLayout(1, add_folder_row)
 
         self.tree_view.setHeaderHidden(True)
@@ -359,12 +454,13 @@ class WorkspaceContents(QMainWindow):
         self.tree_view.setItemDelegateForColumn(0, SidebarItemDelegate(self.tree_view))
         self._applyColumnMode()
 
-    def _sidebarButton(self, glyph, tooltip, handler) -> QToolButton:
+    def _sidebarButton(self, glyph, tooltip, handler, checkable=False) -> QToolButton:
         button = QToolButton(self)
         button.setIcon(theme.icon(glyph))
         button.setToolTip(tooltip)
         button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         button.setAutoRaise(True)
+        button.setCheckable(checkable)
         button.clicked.connect(handler)
         return button
 
@@ -449,9 +545,116 @@ class WorkspaceContents(QMainWindow):
         return folder if folder in self.workspace_folders else None
 
     def _onCurrentChanged(self, current, _previous):
+        if self._revealing:
+            # only navigation: where new files go stays as it is
+            return
         folder = self._folderOfRoot(current)
         if folder is not None:
             self.currentFolderChanged.emit(folder)
+
+    def revealFile(self, file_path, clear_search: bool = True, allow_hidden: bool = True) -> bool:
+        """
+        Select a file in the tree and scroll to it, expanding the folders on the
+        way (folders are loaded when they are expanded). A search in progress is
+        cleared, so that the file is not hidden by it (unless ``clear_search`` is
+        False: then a file that the search hides is not shown). A file in a hidden
+        folder turns on "show hidden folders" (unless ``allow_hidden`` is False: then
+        it is not shown). This is navigation only: it does not change the current
+        workspace folder.
+
+        Returns:
+            True if the file is shown; False if it does not exist, is not inside a
+            workspace folder, or is not listed by the tree (only .cwl, .json and
+            .yaml files outside the ignored folders are).
+        """
+        try:
+            target = Path(file_path).resolve()
+        except (OSError, RuntimeError, ValueError, TypeError):
+            return False
+        if not target.is_file():
+            return False
+        located = self._locate(target)
+        if located is None:
+            return False
+        searching = bool(self._search_text or self._showing_search)
+        if searching and clear_search:
+            self.on_cancel_search_clicked()
+            searching = False
+        # (while the search results are shown, only a file they list can be shown)
+        if not searching and not self.show_hidden and any(part.startswith('.') for part in located[1].parts[:-1]):
+            if not allow_hidden:
+                return False
+            self.setShowHidden(True)
+        index = self._indexOfPath(str(target), expand=True)
+        if index is None:
+            return False
+        if self._selectedPath() == index.siblingAtColumn(0).data(ROLE_PATH):
+            self.tree_view.scrollTo(index, QTreeView.ScrollHint.EnsureVisible)
+            return True
+        self._revealing = True
+        try:
+            self.tree_view.setCurrentIndex(index)
+            self.tree_view.scrollTo(index, QTreeView.ScrollHint.PositionAtCenter)
+        finally:
+            self._revealing = False
+        return True
+
+    def _locate(self, target: Path):
+        """(workspace folder as listed, path of ``target`` inside it) or None."""
+        for folder in self.workspace_folders:
+            try:
+                return Path(folder), target.relative_to(Path(folder).resolve())
+            except ValueError:
+                continue
+        return None
+
+    def _indexOfPath(self, path, expand: bool):
+        """
+        The index of the entry of a file or folder of the workspace, or None. With
+        ``expand`` the folders on the way are expanded (and loaded); without it
+        only entries that are already shown are found.
+        """
+        try:
+            located = self._locate(Path(path).resolve())
+        except (OSError, RuntimeError, ValueError, TypeError):
+            return None
+        if located is None:
+            return None
+        root, relative = located
+        index = self._childByName(QModelIndex(), root.name, str(root))
+        for part in relative.parts:
+            if index is None:
+                return None
+            if expand:
+                self.tree_view.expand(index)    # loads the folder if it was not yet
+            elif not self.tree_view.isExpanded(index):
+                return None
+            index = self._childByName(index, part)
+        return index
+
+    def _childByName(self, parent_index, name, path=None):
+        """
+        The index of the child of ``parent_index`` with this file name (the top
+        level entry of the workspace folder ``path``), or None. Names are
+        compared ignoring the case when none matches exactly, as file systems
+        of macOS and Windows do.
+        """
+        fallback = None
+        for row in range(self.model.rowCount(parent_index)):
+            index = self.model.index(row, 0, parent_index)
+            entry = index.data(ROLE_PATH)
+            if entry is None:
+                continue
+            if path is not None:
+                if entry == path:
+                    return index
+                continue
+            entry_name = Path(entry).name
+            if entry_name == name:
+                return index
+            if fallback is None and entry_name.casefold() == name.casefold():
+                fallback = index
+        return fallback
 
     def showFolder(self, folder):
         """Select the root of a workspace folder and scroll to it."""
@@ -544,10 +747,39 @@ class WorkspaceContents(QMainWindow):
                 self.tree_view.expand(root_index)
                 self._restoreExpansion(expanded, root_index)
         self._shown_roots = list(self.workspace_folders)
-        self.tree_view.resizeColumnToContents(0)
+        self._fitNameColumn()
         self._applyColumnMode()
         self._updateEmptyState()
+        self._watch_timer.start()
     
+    # -- changes on disk ---------------------------------------------------------------------------------
+    def _syncWatches(self):
+        """Watch the workspace folders and the folders that are expanded: the tree follows files added or removed."""
+        wanted = [folder for folder in self.workspace_folders if os.path.isdir(folder)]
+        expanded = sorted(path for path in self._expandedPaths()
+                          if path and path not in wanted and os.path.isdir(path))
+        wanted = (wanted + expanded)[:MAX_WATCHED_FOLDERS]
+        watched = set(self._watcher.directories())
+        stale = list(watched - set(wanted))
+        if stale:
+            self._watcher.removePaths(stale)
+        new = [path for path in wanted if path not in watched]
+        if new:
+            self._watcher.addPaths(new)
+
+    def _onFolderChanged(self, _path):
+        # a burst of changes (a tool writing its outputs) gives one refresh
+        self._refresh_timer.start()
+    
+    def _fitNameColumn(self):
+        """
+        Size the name column to its contents. The side panel does not need it (the
+        column stretches), and measuring every row after each folder that is
+        expanded made expanding a large workspace take many seconds.
+        """
+        if not self.sidebar:
+            self.tree_view.resizeColumnToContents(0)
+
     def _on_item_expanded(self, index):
         """
         Handle expansion of a tree item. Lazy loads children if not already loaded.
@@ -571,8 +803,12 @@ class WorkspaceContents(QMainWindow):
             finally:
                 QApplication.restoreOverrideCursor()
         
-        self.tree_view.resizeColumnToContents(0)
+        self._fitNameColumn()
     
+    def _isListedFolder(self, name: str) -> bool:
+        """False for the folders the tree never lists (see IGNORED_FOLDERS) and, unless asked for, hidden ones."""
+        return name not in IGNORED_FOLDERS and (self.show_hidden or not name.startswith('.'))
+
     def _load_directory_children(self, parent_item, dir_path):
         """
         Load the immediate children of a directory into the tree.
@@ -582,40 +818,38 @@ class WorkspaceContents(QMainWindow):
             parent_item (QStandardItem): The parent item in the tree.
             dir_path (Path): Path to the directory to load.
         """
+        directories = []
+        files = []
         try:
-            # Get all items in the directory
-            items = list(dir_path.iterdir())
+            with os.scandir(dir_path) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir():
+                            # only folders that hold documents are listed
+                            if self._isListedFolder(entry.name) and self._hasCwlFiles(entry.path):
+                                directories.append(entry)
+                        elif entry.is_file() and os.path.splitext(entry.name)[1] in CWL_SUFFIXES:
+                            files.append(entry)
+                    except OSError as e:
+                        self.logger.warning(f"Error accessing {entry.path}: {e}")
         except PermissionError as e:
             self.logger.warning(f"Permission denied accessing {dir_path}: {e}")
             return
         except OSError as e:
             self.logger.warning(f"Error accessing {dir_path}: {e}")
             return
-        
-        # Separate directories and files
-        directories = []
-        files = []
-        
-        for item_path in items:
-            if item_path.is_dir() and not item_path.name.startswith('.'):
-                # Check if directory contains any relevant files (recursively)
-                if self._directory_has_cwl_files(item_path):
-                    directories.append(item_path)
-            elif item_path.is_file() and item_path.suffix in ['.cwl', '.json', '.yaml']:
-                files.append(item_path)
-        
-        # Sort directories
-        if self.sort_mode == 'name':
-            directories.sort(key=lambda d: d.name.lower(), reverse=not self.sort_ascending)
-        else:
-            directories.sort(key=lambda d: d.stat().st_mtime, reverse=not self.sort_ascending)
-        
+
+        def sort_key(entry):
+            return entry.name.lower() if self.sort_mode == 'name' else entry.stat().st_mtime
+
+        directories.sort(key=sort_key, reverse=not self.sort_ascending)
+        files.sort(key=sort_key, reverse=not self.sort_ascending)
+
         # Add directories with placeholder children for lazy loading
-        for dir_item_path in directories:
-            dir_item = QStandardItem(dir_item_path.name)
-            dir_mtime = dir_item_path.stat().st_mtime if dir_item_path.exists() else None
-            dir_date_item = QStandardItem(self._format_mtime(dir_mtime))
-            dir_item.setData(str(dir_item_path), ROLE_PATH)
+        for entry in directories:
+            dir_item = QStandardItem(entry.name)
+            dir_date_item = QStandardItem(self._format_mtime(self._mtime(entry)))
+            dir_item.setData(entry.path, ROLE_PATH)
             dir_item.setData(True, ROLE_IS_DIRECTORY)
             dir_item.setData(False, ROLE_IS_LOADED)
             
@@ -625,40 +859,65 @@ class WorkspaceContents(QMainWindow):
             
             parent_item.appendRow([dir_item, QStandardItem(""), QStandardItem(""), dir_date_item])
         
-        # Sort files
-        if self.sort_mode == 'name':
-            files.sort(key=lambda f: f.name.lower(), reverse=not self.sort_ascending)
-        else:
-            files.sort(key=lambda f: f.stat().st_mtime, reverse=not self.sort_ascending)
-        
         # Add files
-        for file_path in files:
+        for entry in files:
             try:
-                c, cwl_version, file_format = self.getDocumentMetadata(file_path)
-                self._add_file_item(parent_item, file_path, c, cwl_version, file_format)
+                c, cwl_version, file_format = self._cachedMetadata(entry.path, entry.stat())
+                self._add_file_item(parent_item, Path(entry.path), c, cwl_version, file_format,
+                                    mtime=self._mtime(entry))
             except Exception as e:
-                self.logger.warning(f"Error parsing file {file_path}: {e}")
-    
-    def _directory_has_cwl_files(self, dir_path):
-        """
-        Check if a directory or its subdirectories contain any relevant files.
-        
-        Args:
-            dir_path (Path): Path to the directory to check.
-            
-        Returns:
-            bool: True if the directory contains .cwl, .json, or .yaml files.
-        """
+                self.logger.warning(f"Error parsing file {entry.path}: {e}")
+
+    @staticmethod
+    def _mtime(entry):
         try:
-            for ext in ['.cwl', '.json', '.yaml']:
-                # Use glob with limit to quickly check if any files exist
-                for _ in dir_path.glob(f'**/*{ext}'):
-                    return True
-            return False
-        except (PermissionError, OSError):
-            return False
-    
-    def _add_file_item(self, parent_item, file_path, class_, cwl_version=None, file_format=None):
+            return entry.stat().st_mtime
+        except OSError:
+            return None
+
+    def _cachedMetadata(self, path, stat=None):
+        """getDocumentMetadata() of a file, read again only when the file changed."""
+        path = str(path)
+        stat = stat or os.stat(path)
+        key = (stat.st_mtime_ns, stat.st_size)
+        cached = self._metadata_cache.get(path)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        metadata = self.getDocumentMetadata(path)
+        self._metadata_cache[path] = (key, metadata)
+        return metadata
+
+    def _hasCwlFiles(self, dir_path: str) -> bool:
+        """
+        Whether a directory or the folders below it hold any document. The answer
+        is kept until the tree is rebuilt; folders that are not listed are skipped.
+        """
+        known = self._cwl_folders.get(dir_path)
+        if known is not None:
+            return known
+        found = False
+        subfolders = []
+        try:
+            with os.scandir(dir_path) as entries:
+                for entry in entries:
+                    if entry.is_file() and os.path.splitext(entry.name)[1] in CWL_SUFFIXES:
+                        found = True
+                        break
+                    # symbolic links are not followed: a link to a parent folder would never end
+                    if entry.is_dir(follow_symlinks=False) and self._isListedFolder(entry.name):
+                        subfolders.append(entry.path)
+        except OSError:
+            found = False
+        if not found:
+            found = any(self._hasCwlFiles(folder) for folder in subfolders)
+        self._cwl_folders[dir_path] = found
+        return found
+
+    def _directory_has_cwl_files(self, dir_path):
+        """Check if a directory or its subdirectories contain any relevant files (.cwl, .json or .yaml)."""
+        return self._hasCwlFiles(str(dir_path))
+
+    def _add_file_item(self, parent_item, file_path, class_, cwl_version=None, file_format=None, mtime=None):
         """
         Add a file item to the tree.
         
@@ -678,7 +937,7 @@ class WorkspaceContents(QMainWindow):
         if cwl_version:
             tooltip += f"\nCWL Version: {cwl_version}"
         file_item.setToolTip(tooltip)
-        file_mtime = file_path.stat().st_mtime if file_path.exists() else None
+        file_mtime = mtime if mtime is not None else (file_path.stat().st_mtime if file_path.exists() else None)
         file_date_item = QStandardItem(self._format_mtime(file_mtime))
         version_item = self._make_version_item(cwl_version)
         format_item = QStandardItem(file_format or "")
@@ -903,25 +1162,25 @@ class WorkspaceContents(QMainWindow):
             no_results.setFlags(Qt.ItemFlag.NoItemFlags)
             no_results.setForeground(QColor(theme.TEXT_MUTED))
             self.model.appendRow(no_results)
-        self.tree_view.resizeColumnToContents(0)
+        self._fitNameColumn()
         self._applyColumnMode()
         self._updateEmptyState()
 
     def _filter_folder(self, root_item, root_path, search_text):
         """Add the entries of a workspace folder matching the search string under its root item."""
         dir_nodes = {str(root_path): root_item}
-        # Gather all files and directories
+        # Gather all files and directories (the folders that are not listed are not searched)
         all_files = []
         all_dirs = set()
-        for ext in ['.cwl', '.json', '.yaml']:
-            try:
-                for file_path in root_path.glob(f'**/*{ext}'):
+        for current, folders, names in os.walk(root_path):
+            folders[:] = [name for name in folders if self._isListedFolder(name)]
+            for name in names:
+                if os.path.splitext(name)[1] in CWL_SUFFIXES:
+                    file_path = Path(current) / name
                     all_files.append(file_path)
                     for parent in file_path.parents:
                         if parent != root_path and str(parent).startswith(str(root_path)):
                             all_dirs.add(parent)
-            except OSError as e:
-                raise Exception(f"Error accessing files with {ext} extension: {e}")
         # Sort directories
         sorted_dirs = sorted(all_dirs, key=lambda d: str(d).lower(), reverse=not self.sort_ascending)
         # Add matching directories
@@ -951,7 +1210,7 @@ class WorkspaceContents(QMainWindow):
         for file_path in all_files:
             if search_text in file_path.name.lower():
                 try:
-                    c, cwl_version, file_format = self.getDocumentMetadata(file_path)
+                    c, cwl_version, file_format = self._cachedMetadata(file_path)
                     self.add_file_to_tree(file_path, root_path, dir_nodes, c, cwl_version, file_format)
                 except Exception as e:
                     self.logger.warning(f"Error parsing file: {e}")

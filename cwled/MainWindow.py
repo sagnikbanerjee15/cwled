@@ -441,6 +441,8 @@ class MainWindow(WorkbenchWindow):
         host = tabs.window()
         if isinstance(host, WorkbenchWindow):
             host.updateTitle()
+            if tabs.currentWidget() is window:
+                host.followCurrentDocument(only_new=True)
 
     def _showDocument(self, window: ChildWindow):
         """Bring a document tab to the front, in whichever window it is."""

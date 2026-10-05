@@ -13,6 +13,9 @@ workspace_folders: []
 restore_session: true
 # What was open when the application was closed (managed by the application)
 session: {}
+# Workspace panel: list the folders whose name starts with a dot; select the open document in the list
+workspace_show_hidden: false
+workspace_follow_document: true
 # specify the LLM configuration (provider, model, base_url, key env, etc.)
 # Supports standard cloud models as well as local endpoints (Ollama/LM Studio)
 llm:

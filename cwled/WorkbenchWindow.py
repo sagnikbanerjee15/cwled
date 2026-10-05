@@ -50,6 +50,7 @@ class WorkbenchWindow(QMainWindow):
         super().__init__(parent)
         self.controller = controller if controller is not None else self
         self.workspace = workspace
+        self._followed = None       # (document, file) last selected in the Workspace panel by followCurrentDocument
 
     # -- layout -------------------------------------------------------------------
     def buildWorkbench(self):
@@ -65,6 +66,8 @@ class WorkbenchWindow(QMainWindow):
         self.sidebar.addFolderRequested.connect(self.onAddWorkspaceFolder)
         self.sidebar.removeFolderRequested.connect(self.onRemoveWorkspaceFolder)
         self.sidebar.currentFolderChanged.connect(self.onCurrentWorkspaceFolderChanged)
+        self.sidebar.workspace_panel.followDocumentChanged.connect(
+            lambda follow: follow and self.followCurrentDocument())
         splitter.addWidget(self.sidebar)
 
         self.tabs = DetachableTabWidget(self)
@@ -122,6 +125,28 @@ class WorkbenchWindow(QMainWindow):
     def onCurrentTabChanged(self, index: int):
         self.updateTitle()
         self.controller.onTabsCurrentChanged(self)
+        self.followCurrentDocument()
+
+    def followCurrentDocument(self, only_new: bool = False):
+        """
+        Select the file of the document that is shown in the Workspace panel (the
+        button "Select the open document in the list" of the panel turns it off).
+        It leaves a search, a folder that is not shown and the Recent page alone.
+        With ``only_new`` it does so only for a document or file it did not select yet,
+        so that editing a document does not take the selection back from the user.
+        """
+        panel = self.sidebar.workspace_panel
+        if not panel.follow_document or self.sidebar.pages.currentWidget() is not panel:
+            return
+        document = self.tabs.currentWidget()
+        path = getattr(document, 'file_path', None) if isinstance(document, ChildWindow) else None
+        if not path:
+            return
+        key = (id(document), str(path))
+        if only_new and key == self._followed:
+            return
+        self._followed = key
+        panel.revealFile(path, clear_search=False, allow_hidden=False)
 
     def onTabTransferred(self, widget: QWidget, source: QWidget):
         """A tab arrived from another window: merge the workspaces."""
