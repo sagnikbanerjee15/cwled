@@ -73,6 +73,20 @@ This runs PyInstaller, sets up a wrapper script (`run.sh`), and creates `dist/CW
 
 
 
+## Automated tests
+
+The GUI is tested without a display: the tests run the application on Qt's `offscreen` platform and drive it with simulated mouse and key events (`pytests/conftest.py` explains the setup: the configuration, logs and caches are temporary, nothing of the user's is read or written).
+
+```bash
+uv sync --group dev
+uv run pytest                      # everything, about a minute
+uv run pytest pytests/test_graph_canvas.py -k pan    # a part of it
+```
+
+The test code is in `pytests/`; `tests/` holds only CWL documents, which are the fixtures the tests (and the manual checks) open. The tests are run by GitHub Actions on every push to `main` and on pull requests (`.github/workflows/tests.yml`).
+
+What the automated tests cannot see (a real screen, trackpad, native menus, the operating system's file watcher) is listed, feature by feature, in [docs/MANUAL-TESTS.md](docs/MANUAL-TESTS.md): go through it by hand before a release.
+
 ## Tests to run 
 
 ```

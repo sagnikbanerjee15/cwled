@@ -669,6 +669,7 @@ dependencies = [
 dev = [
     { name = "py2app" },
     { name = "pyinstaller" },
+    { name = "pytest" },
 ]
 
 [package.metadata]
@@ -710,6 +711,7 @@ requires-dist = [
 dev = [
     { name = "py2app", specifier = ">=0.28" },
     { name = "pyinstaller", specifier = ">=6.0.0" },
+    { name = "pytest", specifier = ">=8.0.0" },
 ]
 
 [[package]]

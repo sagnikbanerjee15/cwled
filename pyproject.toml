@@ -61,7 +61,18 @@ cwled = "cwled:main"
 dev = [
     "pyinstaller>=6.0.0",
     "py2app>=0.28",
+    "pytest>=8.0.0",
 ]
+
+[tool.pytest.ini_options]
+# GUI tests: they run on Qt's offscreen platform (see pytests/conftest.py).
+# The CWL documents in tests/ are only the fixtures they open: tests/ holds no test code.
+testpaths = ["pytests"]
+pythonpath = ["cwled"]
+python_files = ["test_*.py"]
+# a test that hangs (for example on a dialog that waits for someone) prints where it is after this many seconds
+faulthandler_timeout = 120
+addopts = "--show-capture=no --tb=short"
 
 [tool.uv.sources]
 # PyQt6 fork: upstream create_node() has no width/height/text_alignment kwargs
