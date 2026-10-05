@@ -202,6 +202,209 @@ def test_a_nested_lazily_loaded_folder_is_expanded_and_names_are_matched_loosely
     assert not echo._label_hovered and echo.toolTip() == ''
 
 
+# ---------------------------------------------------------------------------------------- moving around
+def empty_point(viewer) -> QPoint:
+    """A viewport position with no node, edge or label within the viewer's pick area."""
+    viewport = viewer.viewport()
+    for y in range(viewport.height() - 30, 30, -20):
+        for x in range(30, viewport.width() - 30, 20):
+            if not viewer._items_near(viewer.mapToScene(QPoint(x, y)), None, 40, 40):
+                return QPoint(x, y)
+    raise AssertionError('no empty canvas point')
+
+
+def test_dragging_the_empty_canvas_moves_it(window, workflow):
+    _document, graph, viewer = workflow
+    viewport = viewer.viewport()
+    viewer._set_viewer_zoom(400, pos=QPoint(viewport.width() // 2, viewport.height() // 2))       # magnified
+    pump(4)
+    echo_before, upper_before = graph_point(graph, 'echo', 'circle'), graph_point(graph, 'uppercase', 'circle')
+    position = graph.graph.get_node_by_name('echo').view.pos()
+    start = empty_point(viewer)
+    QTest.mousePress(viewport, LEFT, NO_MODIFIER, start)
+    for step in (QPoint(4, 3), QPoint(30, 12), QPoint(80, 25), QPoint(120, 40)):
+        QTest.mouseMove(viewport, start + step)
+        pump(2)
+    assert not viewer._rubber_band.isVisible() and QApplication.overrideCursor() is not None
+    QTest.mouseRelease(viewport, LEFT, NO_MODIFIER, start + QPoint(120, 40))
+    pump(4)
+    moved = graph_point(graph, 'echo', 'circle') - echo_before
+    assert near(moved, QPoint(120, 40), 0)
+    assert graph_point(graph, 'uppercase', 'circle') - upper_before == moved
+    assert graph.graph.get_node_by_name('echo').view.pos() == position, "the nodes keep their place in the workflow"
+    assert QApplication.overrideCursor() is None and not viewer.LMB_state
+    for dx, dy in ((-60, 10), (25, -35)):               # repeated strokes follow the mouse
+        base, start = graph_point(graph, 'echo', 'circle'), empty_point(viewer)
+        QTest.mousePress(viewport, LEFT, NO_MODIFIER, start)
+        QTest.mouseMove(viewport, start + QPoint(dx // 2, dy // 2))
+        QTest.mouseMove(viewport, start + QPoint(dx, dy))
+        QTest.mouseRelease(viewport, LEFT, NO_MODIFIER, start + QPoint(dx, dy))
+        pump(4)
+        assert near(graph_point(graph, 'echo', 'circle') - base, QPoint(dx, dy))
+
+
+def test_the_other_mouse_actions_on_the_canvas_are_unchanged(window, workflow):
+    _document, graph, viewer = workflow
+    viewport = viewer.viewport()
+    # a node is dragged, not the canvas
+    view_before = viewer.mapToScene(QPoint(0, 0))
+    item = graph.graph.get_node_by_name('uppercase').view
+    position, start = item.pos(), graph_point(graph, 'uppercase', 'circle')
+    QTest.mousePress(viewport, LEFT, NO_MODIFIER, start)
+    for step in (QPoint(20, 10), QPoint(50, 30)):
+        QTest.mouseMove(viewport, start + step)
+        pump(2)
+    QTest.mouseRelease(viewport, LEFT, NO_MODIFIER, start + QPoint(50, 30))
+    pump(4)
+    assert item.pos() != position and viewer.mapToScene(QPoint(0, 0)) == view_before
+    # Shift + drag selects with a rectangle
+    QTest.mousePress(viewport, LEFT, Qt.KeyboardModifier.ShiftModifier, QPoint(10, 10))
+    viewer.SHIFT_state = True
+    QTest.mouseMove(viewport, QPoint(200, 200))
+    QTest.mouseMove(viewport, QPoint(viewport.width() - 10, viewport.height() - 10))
+    pump(2)
+    assert viewer._rubber_band.isVisible() and viewer.mapToScene(QPoint(0, 0)) == view_before
+    QTest.mouseRelease(viewport, LEFT, Qt.KeyboardModifier.ShiftModifier, QPoint(viewport.width() - 10, viewport.height() - 10))
+    viewer.SHIFT_state = False
+    pump(4)
+    # a click on the empty canvas clears the selection and does not move it
+    graph.graph.get_node_by_name('echo').set_selected(True)
+    pump(2)
+    click(viewer, empty_point(viewer))
+    assert not graph.graph.get_node_by_name('echo').selected() and viewer.mapToScene(QPoint(0, 0)) == view_before
+    # Alt + drag still pans
+    base, start = graph_point(graph, 'echo', 'circle'), empty_point(viewer)
+    viewer.ALT_state = True
+    QTest.mousePress(viewport, LEFT, Qt.KeyboardModifier.AltModifier, start)
+    QTest.mouseMove(viewport, start + QPoint(20, 10))
+    QTest.mouseMove(viewport, start + QPoint(40, 20))
+    QTest.mouseRelease(viewport, LEFT, Qt.KeyboardModifier.AltModifier, start + QPoint(40, 20))
+    viewer.ALT_state = False
+    pump(4)
+    assert near(graph_point(graph, 'echo', 'circle') - base, QPoint(40, 20))
+
+
+def wheel(viewport, pixel, angle, modifiers=NO_MODIFIER, phase=Qt.ScrollPhase.NoScrollPhase, position=QPoint(200, 200)):
+    event = QWheelEvent(QPointF(position), QPointF(viewport.mapToGlobal(position)), pixel, angle,
+                        Qt.MouseButton.NoButton, modifiers, phase, False)
+    QApplication.sendEvent(viewport, event)
+    pump(3)
+
+
+def test_trackpad_pinch_wheel_and_keys(window, workflow):
+    _document, graph, viewer = workflow
+    viewport = viewer.viewport()
+    scale = lambda: GraphItems.viewScale(viewer)
+    # two-finger scroll moves the canvas (the content follows the fingers) and does not zoom
+    before, zoom = graph_point(graph, 'echo', 'circle'), scale()
+    wheel(viewport, QPoint(30, -20), QPoint(0, 0), phase=Qt.ScrollPhase.ScrollUpdate)
+    assert near(graph_point(graph, 'echo', 'circle') - before, QPoint(30, -20)) and abs(scale() - zoom) < 1e-9
+    # Cmd/Ctrl + scroll zooms around the cursor; a mouse wheel zooms too
+    at = QPoint(300, 250)
+    anchor = viewer.mapToScene(at)
+    wheel(viewport, QPoint(0, 0), QPoint(0, 120), modifiers=CTRL, position=at)
+    assert scale() > zoom * 1.05 and near(viewer.mapFromScene(anchor), at)
+    zoom = scale()
+    wheel(viewport, QPoint(0, 0), QPoint(0, 120))
+    assert scale() != zoom
+    for _ in range(60):
+        wheel(viewport, QPoint(0, 0), QPoint(0, 400), modifiers=CTRL)
+    assert scale() <= GraphItems.MAX_SCALE + 1e-6
+    for _ in range(120):
+        wheel(viewport, QPoint(0, 0), QPoint(0, -400), modifiers=CTRL)
+    assert scale() >= GraphItems.MIN_SCALE - 1e-6
+    GraphItems.fitToViewport(graph.graph)
+    pump(3)
+    # pinch
+    zoom, local = scale(), QPointF(250, 250)
+    event = QNativeGestureEvent(Qt.NativeGestureType.ZoomNativeGesture, QPointingDevice.primaryPointingDevice(), 2,
+                                local, local, QPointF(viewport.mapToGlobal(QPoint(250, 250))), 0.25, QPointF(), 0)
+    QApplication.sendEvent(viewport, event)
+    pump(3)
+    assert abs(scale() / zoom - 1.25) < 0.02
+    # keys: arrows move (Shift: four times as far), + and - zoom, 0 fits
+    GraphItems.fitToViewport(graph.graph)
+    pump(3)
+    base = graph_point(graph, 'echo', 'circle')
+    QTest.keyClick(viewer, Qt.Key.Key_Left)
+    assert near(graph_point(graph, 'echo', 'circle') - base, QPoint(60, 0))
+    QTest.keyClick(viewer, Qt.Key.Key_Down, Qt.KeyboardModifier.ShiftModifier)
+    assert near(graph_point(graph, 'echo', 'circle') - base, QPoint(60, -240))
+    zoom = scale()
+    QTest.keyClick(viewer, Qt.Key.Key_Plus)
+    assert scale() > zoom
+    QTest.keyClick(viewer, Qt.Key.Key_Minus)
+    assert abs(scale() - zoom) < 1e-6
+    QTest.keyClick(viewer, Qt.Key.Key_Plus)
+    QTest.keyClick(viewer, Qt.Key.Key_Plus)
+    QTest.keyClick(viewer, Qt.Key.Key_0)
+    pump(3)
+    assert scale() <= 1.0
+
+
+def test_holding_space_moves_the_canvas_from_anywhere(window, workflow):
+    _document, graph, viewer = workflow
+    viewport = viewer.viewport()
+    GraphItems.fitToViewport(graph.graph)
+    pump(3)
+    item = graph.graph.get_node_by_name('echo').view
+    position, base = item.pos(), graph_point(graph, 'echo', 'circle')
+    QTest.keyPress(viewer, Qt.Key.Key_Space)
+    start = graph_point(graph, 'echo', 'circle')
+    QTest.mousePress(viewport, LEFT, NO_MODIFIER, start)
+    for dx, dy in ((10, 8), (40, 20), (90, 35)):
+        QTest.mouseMove(viewport, start + QPoint(dx, dy))
+        pump(2)
+    QTest.mouseRelease(viewport, LEFT, NO_MODIFIER, start + QPoint(90, 35))
+    QTest.keyRelease(viewer, Qt.Key.Key_Space)
+    pump(3)
+    assert near(graph_point(graph, 'echo', 'circle') - base, QPoint(90, 35)) and item.pos() == position
+    assert QApplication.overrideCursor() is None and not viewer.LMB_state
+
+
+def test_linked_views_pan_and_zoom_together(window, workflow):
+    document, graph, viewer = workflow
+    window.tabs.detachTab(document)
+    pump(10)
+    other = open_documents(window, ['51-workflow.cwl'], host=window)['51-workflow.cwl']
+    detached = window.detached_windows[0]
+    detached.show()
+    pump(10)
+    graph2 = other.workflow_editor.graph
+    viewer2 = graph2.graph.viewer()
+    assert viewer.isVisible() and viewer2.isVisible()
+    GraphItems.fitToViewport(graph.graph)
+    GraphItems.fitToViewport(graph2.graph)
+    pump(3)
+    first, second = graph_point(graph, 'echo', 'circle'), graph_point(graph2, 'echo', 'circle')
+    GraphItems.panViewer(viewer, 25, 10)                    # not linked: the other graph stays
+    pump(2)
+    assert graph_point(graph2, 'echo', 'circle') == second
+    GraphItems.LINK.setEnabled(True)
+    pump(3)
+    first, second = graph_point(graph, 'echo', 'circle'), graph_point(graph2, 'echo', 'circle')
+    GraphItems.panViewer(viewer, 40, -15)
+    pump(2)
+    assert near(graph_point(graph, 'echo', 'circle') - first, QPoint(40, -15))
+    assert near(graph_point(graph2, 'echo', 'circle') - second, QPoint(40, -15))
+    zoom1, zoom2 = GraphItems.viewScale(viewer), GraphItems.viewScale(viewer2)
+    GraphItems.zoomViewer(viewer, 1.3, QPoint(250, 250))
+    pump(2)
+    assert abs(GraphItems.viewScale(viewer) / zoom1 - 1.3) < 1e-3 and abs(GraphItems.viewScale(viewer2) / zoom2 - 1.3) < 1e-3
+    # the Window menu follows the setting; turning it off unlinks
+    def link_action():
+        menu = [a.menu() for a in window.menuBar().actions() if a.text().replace('&', '') == 'Window'][0]
+        return [a for a in menu.actions() if a.text() == 'Link Workflow Views'][0]
+    assert link_action().isChecked()
+    GraphItems.LINK.setEnabled(False)
+    pump(3)
+    assert not link_action().isChecked()
+    second = graph_point(graph2, 'echo', 'circle')
+    GraphItems.panViewer(viewer, 30, 30)
+    pump(2)
+    assert graph_point(graph2, 'echo', 'circle') == second
+
+
 # ---------------------------------------------------------------------------------------- drawing the graph
 def hover_canvas(viewer):
     """Rest the mouse pointer over the canvas, as it is while someone works on the graph with the keyboard."""

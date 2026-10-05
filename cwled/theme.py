@@ -136,7 +136,7 @@ FA = {
     'sort': '\uf0dc', 'sort-alpha-asc': '\uf15d', 'terminal': '\uf120',
     'times': '\uf00d', 'times-circle': '\uf057', 'trash': '\uf1f8',
     'warning': '\uf071',
-    'columns': '\uf0db', 'crosshairs': '\uf05b', 'eye-slash': '\uf070',
+    'link': '\uf0c1', 'columns': '\uf0db', 'crosshairs': '\uf05b', 'eye-slash': '\uf070',
 }
 
 # Glyphs mirrored horizontally, as Composer does for its workflow icon
@@ -1178,6 +1178,7 @@ QPushButton[graphControl="only"], QPushButton[graphControl="first"],
 QPushButton[graphControl="middle"], QPushButton[graphControl="last"] {{
     padding: 5px 7px; min-width: 11px; icon-size: 11px;
 }}
+QPushButton[graphControl]:checked {{ background-color: {BLACK}; border-color: {SKY}; }}
 QPushButton[graphControl="first"] {{ border-top-right-radius: 0; border-bottom-right-radius: 0; }}
 QPushButton[graphControl="middle"] {{ border-radius: 0; border-left: none; }}
 QPushButton[graphControl="last"] {{ border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: none; }}

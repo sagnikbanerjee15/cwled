@@ -8,9 +8,10 @@ thin grey curves with a halo in the canvas colour, and selecting something
 fades the rest of the graph.
 """
 import math
+import weakref
 
 from PyQt6 import sip
-from PyQt6.QtCore import QByteArray, QEvent, QPointF, QRectF, Qt
+from PyQt6.QtCore import QByteArray, QEvent, QObject, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import (QBrush, QColor, QFont, QFontMetricsF, QPainter,
                          QPainterPath, QPainterPathStroker, QPen)
 from PyQt6.QtSvg import QSvgRenderer
@@ -748,9 +749,250 @@ def fitToViewport(graph):
         viewer._update_scene()
 
 
+def zoomFactor(viewer, factor):
+    """``factor`` limited so that the zoom stays between cwl-svg's MIN_SCALE and MAX_SCALE."""
+    scale = viewScale(viewer)
+    return min(max(scale * factor, MIN_SCALE), MAX_SCALE) / scale
+
+
+def zoomViewer(viewer, factor, position=None):
+    """Zoom the canvas by ``factor`` around ``position`` (a point of the viewport; by default its centre)."""
+    factor = zoomFactor(viewer, factor)
+    if abs(factor - 1) < 1e-6:
+        return
+    anchor = viewer.mapToScene(position) if position is not None else None
+    viewer.scale(factor, factor, anchor)
+
+
+def panViewer(viewer, dx, dy):
+    """Move the canvas by (dx, dy) pixels of the viewport: the content follows the movement."""
+    scale = viewScale(viewer)
+    viewer._set_viewer_pan(-dx / scale, -dy / scale)
+
+
+class ViewLink(QObject):
+    """
+    "Link views": panning or zooming the workflow graph of one window does the
+    same in the graphs of the other visible windows, so that two workflows (or
+    two versions of one) that are compared side by side stay aligned. The
+    movement is the same on the screen, whatever the zoom of each graph.
+    """
+    changed = pyqtSignal(bool)
+
+    def __init__(self):
+        super().__init__()
+        self._enabled = False
+        self._viewers = []          # weak references to the viewers of the graphs
+        self._busy = False
+
+    def enabled(self):
+        return self._enabled
+
+    def setEnabled(self, enabled):
+        enabled = bool(enabled)
+        if enabled != self._enabled:
+            self._enabled = enabled
+            self.changed.emit(enabled)
+
+    def register(self, viewer):
+        self._viewers.append(weakref.ref(viewer))
+
+    def others(self, viewer):
+        """The other graphs that are shown."""
+        live = []
+        for reference in list(self._viewers):
+            other = reference()
+            if other is None or _gone(other):
+                self._viewers.remove(reference)
+            elif other is not viewer and other.isVisible():
+                live.append(other)
+        return live
+
+    def panned(self, viewer, dx, dy):
+        """``viewer`` was panned by (dx, dy) scene units."""
+        if not self._enabled or self._busy:
+            return
+        scale = viewScale(viewer)
+        self._busy = True
+        try:
+            for other in self.others(viewer):
+                other._pan_unlinked(dx * scale / viewScale(other), dy * scale / viewScale(other))
+        finally:
+            self._busy = False
+
+    def zoomed(self, viewer, factor, anchor):
+        """``viewer`` was zoomed by ``factor`` around the scene point ``anchor``."""
+        if not self._enabled or self._busy:
+            return
+        point = viewer.mapFromScene(anchor) if anchor is not None else viewer.viewport().rect().center()
+        self._busy = True
+        try:
+            for other in self.others(viewer):
+                other._scale_unlinked(factor, factor, other.mapToScene(point))
+        finally:
+            self._busy = False
+
+
+# one for the application: it links the graphs of all windows
+LINK = ViewLink()
+
+
+class CanvasNavigator(QObject):
+    """
+    Moving around the workflow canvas, as in Composer and the usual graph editors:
+
+    * dragging the empty canvas with the left mouse button moves it. The viewer
+      would draw a selection rectangle instead (it only pans with Alt + left
+      button or the middle button); Shift + drag still selects with a
+      rectangle. Nodes, ports and connections are dragged as before: only a
+      drag that starts on the empty canvas pans;
+    * holding Space makes a left drag move the canvas wherever it starts;
+    * scrolling with a trackpad moves the canvas, and Cmd/Ctrl + scroll or a
+      pinch zooms (the wheel of a mouse still zooms);
+    * the arrow keys move the canvas, + and - zoom and 0 fits the workflow.
+    """
+    KEY_STEP = 60               # pixels moved by an arrow key (four times as many with Shift)
+    KEY_ZOOM = 1.1              # zoom by + and - (the zoom buttons' step)
+
+    def __init__(self, viewer):
+        super().__init__(viewer)
+        self.viewer = viewer
+        self._press = None      # viewport position where the left button went down
+        self._last = None       # viewport position of the last pan step; None unless panning
+        self._space = False     # Space is held
+        self._space_pan = False  # the pan started with Space: the whole press is ours
+        viewer.viewport().installEventFilter(self)
+        viewer.installEventFilter(self)
+
+    @property
+    def panning(self):
+        return self._last is not None
+
+    def eventFilter(self, obj, event):
+        kind = event.type()
+        if obj is self.viewer:
+            if kind in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+                return self._key(event, kind == QEvent.Type.KeyPress)
+            if kind == QEvent.Type.FocusOut:
+                self._setSpace(False)
+            return False
+        if kind == QEvent.Type.MouseButtonPress:
+            self._stop()
+            if event.button() == Qt.MouseButton.LeftButton and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+                self._press = event.position().toPoint()
+                if self._space:
+                    self._space_pan = True
+                    self._begin(self._press)
+                    return True
+            else:
+                self._press = None
+        elif kind == QEvent.Type.MouseMove:
+            if self.panning or self._press is not None:
+                if not (event.buttons() & Qt.MouseButton.LeftButton):
+                    self._stop()
+                elif self._pan(event.position().toPoint()):
+                    return True
+        elif kind == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+            ours = self._space_pan
+            self._stop()
+            return ours
+        elif kind == QEvent.Type.Wheel:
+            return self._wheel(event)
+        elif kind == QEvent.Type.NativeGesture:
+            return self._gesture(event)
+        return False
+
+    # -- dragging ----------------------------------------------------------------
+    def _begin(self, position):
+        self._last = position
+        QApplication.setOverrideCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def _pan(self, position):
+        """Move the canvas with the mouse; True if the move belongs to the pan."""
+        viewer = self.viewer
+        if not self.panning:
+            # The viewer has seen the press by now: it arms its selection
+            # rectangle exactly when the press was on the empty canvas.
+            if not viewer._rubber_band.isActive:
+                return False
+            if (position - self._press).manhattanLength() < QApplication.startDragDistance():
+                return False
+            viewer._rubber_band.isActive = False
+            viewer._rubber_band.hide()
+            self._begin(self._press)
+        previous = self._last
+        panViewer(viewer, position.x() - previous.x(), position.y() - previous.y())
+        self._last = position
+        return True
+
+    def _stop(self):
+        if self.panning:
+            QApplication.restoreOverrideCursor()
+        self._press = self._last = None
+        self._space_pan = False
+
+    # -- trackpad and wheel ----------------------------------------------------------
+    def _wheel(self, event):
+        viewer = self.viewer
+        pixels = event.pixelDelta()
+        precise = not pixels.isNull() or event.phase() != Qt.ScrollPhase.NoScrollPhase
+        if event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier):
+            amount = pixels.y() if not pixels.isNull() else event.angleDelta().y()
+            zoomViewer(viewer, 1.001 ** amount, event.position().toPoint())
+            return True
+        if precise:
+            if pixels.isNull():
+                pixels = event.angleDelta() / 2
+            panViewer(viewer, pixels.x(), pixels.y())
+            return True
+        return False        # the wheel of a mouse zooms, in the viewer
+
+    def _gesture(self, event):
+        kind = event.gestureType()
+        if kind == Qt.NativeGestureType.ZoomNativeGesture:
+            zoomViewer(self.viewer, 1 + event.value(), event.position().toPoint())
+            return True
+        if kind == Qt.NativeGestureType.SmartZoomNativeGesture:
+            fitToViewport(self.viewer._cwled_graph)
+            return True
+        return False
+
+    # -- keys ------------------------------------------------------------------------
+    def _setSpace(self, held):
+        if held != self._space:
+            self._space = held
+            if held:
+                self.viewer.viewport().setCursor(Qt.CursorShape.OpenHandCursor)
+            else:
+                self.viewer.viewport().unsetCursor()
+
+    def _key(self, event, pressed):
+        key = event.key()
+        if key == Qt.Key.Key_Space and not event.isAutoRepeat():
+            self._setSpace(pressed)
+            return True
+        if not pressed or event.modifiers() & ~Qt.KeyboardModifier.ShiftModifier & ~Qt.KeyboardModifier.KeypadModifier:
+            return False
+        step = self.KEY_STEP * (4 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1)
+        moves = {Qt.Key.Key_Left: (step, 0), Qt.Key.Key_Right: (-step, 0),
+                 Qt.Key.Key_Up: (0, step), Qt.Key.Key_Down: (0, -step)}
+        if key in moves:
+            panViewer(self.viewer, *moves[key])
+        elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            zoomViewer(self.viewer, self.KEY_ZOOM)
+        elif key in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore):
+            zoomViewer(self.viewer, 1 / self.KEY_ZOOM)
+        elif key == Qt.Key.Key_0:
+            fitToViewport(self.viewer._cwled_graph)
+        else:
+            return False
+        return True
+
+
 def install(graph):
     """Hook a NodeGraph up to the Composer look: label scaling on zoom,
-    selection fading and Composer's zoom range."""
+    selection fading, Composer's zoom range, moving around the canvas (see
+    CanvasNavigator) and linking its view to the other graphs (see ViewLink)."""
     import OdenGraphQt.widgets.viewer as viewer_module
     # cwl-svg zooms between 0.2 and 2 (the viewer measures zoom as scale - 1)
     viewer_module.ZOOM_MIN = MIN_SCALE - 1
@@ -769,6 +1011,26 @@ def install(graph):
                 item.setLabelScale(scale)
 
     viewer._update_scene = _update_scene
+
+    # every pan and zoom of the canvas, whoever asks for it (the mouse, the wheel, the zoom
+    # buttons, the keys), is passed on to the linked views
+    viewer._cwled_graph = graph
+    viewer._pan_unlinked = viewer._set_viewer_pan
+    viewer._scale_unlinked = viewer.scale
+
+    def _set_viewer_pan(pos_x, pos_y):
+        viewer._pan_unlinked(pos_x, pos_y)
+        LINK.panned(viewer, pos_x, pos_y)
+
+    def _scale(sx, sy, pos=None):
+        anchor = pos if pos is not None else viewer._scene_range.center()
+        viewer._scale_unlinked(sx, sy, pos)
+        LINK.zoomed(viewer, sx, anchor)
+
+    viewer._set_viewer_pan = _set_viewer_pan
+    viewer.scale = _scale
+    LINK.register(viewer)
+    CanvasNavigator(viewer)
     scene.selectionChanged.connect(lambda: refreshSelection(scene))
     graph.port_connected.connect(lambda *args: refreshSelection(scene))
     graph.port_disconnected.connect(lambda *args: refreshSelection(scene))
@@ -797,6 +1059,12 @@ class GraphControls(QWidget):
             ('minus', 'Zoom Out', lambda: self.zoomBy(-self.ZOOM_STEP)),
             ('compress', 'Fit to Viewport', self.fitToViewport)])
         self.arrange_button, = self._group(layout, [('paint-brush', 'Auto-arrange', on_arrange)])
+        # linked views: panning and zooming this graph does the same in the graphs of the other windows
+        self.link_button, = self._group(layout, [('link', 'Link the view to the other windows\' workflows', None)])
+        self.link_button.setCheckable(True)
+        self.link_button.setChecked(LINK.enabled())
+        self.link_button.toggled.connect(LINK.setEnabled)
+        LINK.changed.connect(self.link_button.setChecked)
         self.export_button, = self._group(layout, [('file-image-o', 'Export Image', on_export)])
         self.delete_button.parentWidget().setVisible(False)
         viewer = graph.viewer()

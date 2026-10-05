@@ -39,6 +39,7 @@ from platformdirs import user_config_path, user_log_path
 import version
 import itertools
 import theme
+import GraphItems
 logger = logging.getLogger(__name__)
 
 
@@ -102,6 +103,7 @@ class MainWindow(WorkbenchWindow):
         self._last_host=None       # the window that was last active
         self._recent_menus=[]      # the Recent menu of every window
         self._window_menus=[]      # the Window menu of every window
+        GraphItems.LINK.changed.connect(lambda _enabled: self.refreshWindowMenus())
         self.logger.info(f"Setting up {self.__class__.__name__}")
         self.logger.info(f"Logging level set to {logging.getLevelName(self.logger.level)}")
         self.openWindowFromFile.connect( self.onCreateWindowFromFile )
@@ -888,6 +890,11 @@ class MainWindow(WorkbenchWindow):
             if self.detached_windows:
                 menu.addAction("Reattach All Tabs to the Main Window", self.reattachAllWindows)
                 menu.addAction("Tile Windows Side by Side", self.tileWindows)
+            link = menu.addAction("Link Workflow Views")
+            link.setCheckable(True)
+            link.setChecked(GraphItems.LINK.enabled())
+            link.setToolTip("Panning or zooming a workflow does the same in the workflows of the other windows")
+            link.toggled.connect(GraphItems.LINK.setEnabled)
             menu.addSeparator()
             for window_id, title in self.window_titles.items():
                 menu.addAction(title, lambda _checked=False, window_id=window_id: self.onMenuFocus(window_id))

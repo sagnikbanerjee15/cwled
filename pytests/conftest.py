@@ -76,6 +76,7 @@ def cwled_config(qapp, tmp_path, monkeypatch):
 @pytest.fixture
 def make_window(cwled_config, qapp):
     """Factory of main windows, on the workspace folder given (by default the test documents)."""
+    import GraphItems
     import workspaceFolders
     from MainWindow import MainWindow
     windows = []
@@ -96,6 +97,7 @@ def make_window(cwled_config, qapp):
         return window
 
     yield factory
+    GraphItems.LINK.setEnabled(False)
     # A test may leave a document with unsaved changes: closing it must not open the "Save changes?"
     # dialog and wait for someone to answer it (which would hang the tests).
     from PyQt6.QtWidgets import QMessageBox
