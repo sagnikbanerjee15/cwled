@@ -25,6 +25,183 @@ def workflow(window):
     return document, graph, graph.graph.viewer()
 
 
+def selected(window):
+    index = window.sidebar.workspace_panel.tree_view.currentIndex()
+    return index.data(ROLE_PATH) if index.isValid() else None
+
+
+def reset_selection(window):
+    panel = window.sidebar.workspace_panel
+    panel.tree_view.setCurrentIndex(panel.model.index(0, 0))
+    panel.tree_view.collapseAll()
+    pump(2)
+
+
+def click(viewer, point, modifier=NO_MODIFIER):
+    QTest.mouseClick(viewer.viewport(), LEFT, modifier, point)
+    pump(4)
+
+
+def double_click(viewer, point):
+    """What the mouse sends: press and release, then the double click and its release."""
+    QTest.mouseClick(viewer.viewport(), LEFT, NO_MODIFIER, point)
+    QTest.mouseDClick(viewer.viewport(), LEFT, NO_MODIFIER, point)
+    pump(6)
+    if viewer.scene().mouseGrabberItem() is not None:       # QTest sends no release after the double click
+        QTest.mouseRelease(viewer.viewport(), LEFT, NO_MODIFIER, point)
+        pump(4)
+
+
+# ---------------------------------------------------------------------------------------- clicking names
+def test_clicking_the_name_of_a_step_shows_its_file_in_the_workspace_panel(window, workflow):
+    _document, graph, viewer = workflow
+    echo, upper = graph.graph.get_node_by_name('echo').view, graph.graph.get_node_by_name('uppercase').view
+    assert echo.labelClickable and 'echo.cwl' in echo.labelToolTip
+    window.sidebar.tabs.setCurrentIndex(1)                  # the Recent page: the click brings the Workspace page back
+    reset_selection(window)
+    folder = window.workspace.currentFolder()
+    click(viewer, graph_point(graph, 'echo'))
+    assert selected(window) == str(FIXTURES / 'echo.cwl') and window.sidebar.tabs.currentIndex() == 0
+    import os
+    assert window.workspace.currentFolder() == folder and os.getcwd() == folder, "navigation does not change the current folder"
+
+    # only the name counts: not the circle, not a drag
+    reset_selection(window)
+    before = selected(window)
+    click(viewer, graph_point(graph, 'uppercase', 'circle'))
+    assert selected(window) == before
+    start, position = graph_point(graph, 'uppercase'), upper.pos()
+    QTest.mousePress(viewer.viewport(), LEFT, NO_MODIFIER, start)
+    for dx, dy in ((10, 5), (30, 20), (60, 40)):
+        QTest.mouseMove(viewer.viewport(), start + QPoint(dx, dy))
+        pump(2)
+    QTest.mouseRelease(viewer.viewport(), LEFT, NO_MODIFIER, start + QPoint(60, 40))
+    pump(4)
+    assert upper.pos() != position and selected(window) == before, "a drag from the name moves the node"
+
+
+def test_double_clicking_a_node_opens_the_inspector_from_the_circle_and_from_the_name(window, workflow):
+    document, graph, viewer = workflow
+    inspector = document.workflow_editor.step_inspector
+    assert not inspector.isVisible()
+    double_click(viewer, graph_point(graph, 'echo', 'circle'))
+    assert inspector.isVisible() and inspector._node_name == 'echo'
+    inspector.close_inspector()
+    pump(3)
+    reset_selection(window)
+    double_click(viewer, graph_point(graph, 'uppercase'))
+    assert inspector.isVisible() and inspector._node_name == 'uppercase'
+
+
+def test_the_search_and_missing_workspace_folders(window, workflow):
+    _document, graph, viewer = workflow
+    panel = window.sidebar.workspace_panel
+    panel.search_box.setText('hello')
+    panel.on_search_clicked()
+    pump(3)
+    assert panel._showing_search
+    click(viewer, graph_point(graph, 'echo'))
+    assert not panel._showing_search and panel.search_box.text() == '' and selected(window) == str(FIXTURES / 'echo.cwl')
+    window.workspace.addFolder(str(FIXTURES.parent / 'docs'))
+    window.workspace.removeFolder(str(FIXTURES))
+    window.updateWorkspaceViews()
+    pump(4)
+    click(viewer, graph_point(graph, 'echo'))
+    assert 'not in a workspace folder' in window.statusBar().currentMessage()
+
+
+def test_a_workflow_in_a_detached_window_reveals_in_that_windows_panel(window, workflow):
+    document, graph, viewer = workflow
+    window.tabs.detachTab(document)
+    pump(12)
+    detached = window.detached_windows[0]
+    detached.show()
+    pump(8)
+    before = selected(window)
+    reset_selection(detached)
+    click(graph.graph.viewer(), graph_point(graph, 'echo'))
+    assert selected(detached) == str(FIXTURES / 'echo.cwl') and selected(window) == before
+
+
+def test_ctrl_click_opens_the_step(window, workflow):
+    document, graph, viewer = workflow
+    click(viewer, graph_point(graph, 'echo'), CTRL)
+    pump(10)
+    assert 'echo.cwl' in titles(window.tabs) and Path(str(window.tabs.currentWidget().file_path)).name == 'echo.cwl'
+    window.tabs.setCurrentWidget(document)
+    pump(4)
+    click(viewer, graph_point(graph, 'echo'), CTRL)
+    assert titles(window.tabs).count('echo.cwl') == 1, "an open file is brought forward"
+
+    # a step defined inside the workflow: its definition in the Code tab
+    inline = open_documents(window, ['51-workflow.cwl'])['51-workflow.cwl']
+    pump(6)
+    graph2 = inline.workflow_editor.graph
+    click(graph2.graph.viewer(), graph_point(graph2, 'uppercase'), CTRL)
+    pump(20)
+    assert inline.tabs.currentWidget() is inline.code_editor
+    assert inline.code_editor.editor.selectedText().strip() in ('uppercase:', '- id: uppercase')
+
+
+@pytest.mark.parametrize('fmt, text, step, expected', [
+    ('YAML', "cwlVersion: v1.2\nclass: Workflow\ninputs:\n  echo: string\nsteps:\n  - id: echo\n    run: a.cwl\n"
+             "  - id: up\n    run: b.cwl\noutputs:\n  echo:\n    type: string\n", 'up', (True, 7)),
+    ('YAML', "cwlVersion: v1.2\nclass: Workflow\ninputs:\n  echo: string\nsteps:\n  - id: echo\n    run: a.cwl\n"
+             "  - id: up\n    run: b.cwl\noutputs:\n  echo:\n    type: string\n", 'echo', (True, 5)),
+    ('YAML', "steps:\n  - id: a\n", 'nope', (False, None)),
+    ('JSON', '{\n "inputs": {"echo": {}},\n "steps": {\n  "echo": {"run": "a.cwl"},\n  "up": {}\n }\n}', 'echo', (True, 3)),
+    ('JSON', '{\n "inputs": {"echo": {}},\n "steps": {\n  "echo": {"run": "a.cwl"},\n  "up": {}\n }\n}', 'up', (True, 4)),
+])
+def test_finding_a_step_in_the_code(fmt, text, step, expected):
+    from TabCodeEditor import CodeWindow
+    cursor = {}
+
+    class Editor:
+        def text(self): return text
+        def ensureLineVisible(self, line): pass
+        def setCursorPosition(self, line, index): cursor['line'] = line
+        def setSelection(self, *args): pass
+        def setFocus(self): pass
+
+    fake = type('Fake', (), {})()
+    fake.editor, fake.format = Editor(), fmt
+    assert (CodeWindow.showStep(fake, step), cursor.get('line')) == expected
+
+
+def test_a_nested_lazily_loaded_folder_is_expanded_and_names_are_matched_loosely(make_window, tmp_path):
+    (tmp_path / 'flows').mkdir()
+    (tmp_path / 'tools' / 'deep' / 'deeper').mkdir(parents=True)
+    shutil.copy(FIXTURES / 'echo.cwl', tmp_path / 'tools' / 'deep' / 'deeper' / 'echo.cwl')
+    shutil.copy(FIXTURES / 'uppercase.cwl', tmp_path / 'Tools-Upper.cwl')
+    (tmp_path / 'flows' / 'wf.cwl').write_text(
+        "cwlVersion: v1.2\nclass: Workflow\ninputs:\n  message: string\noutputs:\n  out:\n    type: string\n"
+        "    outputSource: up/uppercase_message\nsteps:\n  echo:\n    run: ../tools/deep/deeper/echo.cwl\n"
+        "    in:\n      message: message\n    out: [out]\n  up:\n    run: ../tools-upper.cwl\n    in:\n      message:\n"
+        "        source: echo/out\n    out: [uppercase_message]\n")
+    window = make_window(tmp_path)
+    park_cursor()
+    window.openDocument(str(tmp_path / 'flows' / 'wf.cwl'))
+    pump(15)
+    document = list(window.open_windows.values())[-1]
+    graph = document.workflow_editor.graph
+    viewer = graph.graph.viewer()
+    pump(8)
+    click(viewer, graph_point(graph, 'echo'))
+    root = str(tmp_path.resolve())
+    assert selected(window) == root + '/tools/deep/deeper/echo.cwl'
+    click(viewer, graph_point(graph, 'up'))
+    assert selected(window) == root + '/Tools-Upper.cwl', "the step names it in lower case"
+
+    # pointing at the name underlines it and shows a tooltip, pointing at the circle does not
+    echo = graph.graph.get_node_by_name('echo').view
+    QTest.mouseMove(viewer.viewport(), graph_point(graph, 'echo'))
+    pump(4)
+    assert echo._label_hovered and 'echo.cwl' in echo.toolTip()
+    QTest.mouseMove(viewer.viewport(), graph_point(graph, 'echo', 'circle'))
+    pump(4)
+    assert not echo._label_hovered and echo.toolTip() == ''
+
+
 # ---------------------------------------------------------------------------------------- drawing the graph
 def hover_canvas(viewer):
     """Rest the mouse pointer over the canvas, as it is while someone works on the graph with the keyboard."""

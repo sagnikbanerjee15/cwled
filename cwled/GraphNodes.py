@@ -1328,6 +1328,9 @@ class StepNode(CWLNode, QObject):
         
         self.create_property('worklow_step_id', self.id)
 
+        # Clicking the name of a step shows its file in the workspace panel
+        self.view.labelClickable = True
+
         # We'll connect to the double-click signal later when the node is added to a graph
         # Don't try to connect here as self.graph may not exist yet
 
@@ -1471,6 +1474,8 @@ class StepNode(CWLNode, QObject):
             self.applyNodeColors(theme.GRAPH['step_conditional'])
         else:
             self.applyNodeColors(theme.GRAPH['step'])
+        if self.cwl_filename:
+            self.view.labelToolTip = f"Show {os.path.basename(self.cwl_filename)} in the workspace"
         self.logger.debug(f"For StepNode: {self.name()} - class {self.cwl_tool.class_}")
         
         self.addInputs()

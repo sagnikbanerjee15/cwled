@@ -230,6 +230,9 @@ class CWLNodeItem(NodeItem):
         self._label_rect = QRectF()
         self._glyph = None
         self._hovered = False
+        self._label_hovered = False     # the pointer is on the name of a node with a clickable name
+        self.labelClickable = False     # clicking the name does something (it is underlined on hover)
+        self.labelToolTip = ''          # what clicking the name does
         self._faded = False
         self._lit_ports = set()
         super().__init__(name, parent)
@@ -277,6 +280,16 @@ class CWLNodeItem(NodeItem):
     def _labelChanged(self):
         self._updateLabelGeometry()
         self.update()
+
+    def isLabelAt(self, scene_pos):
+        """True if ``scene_pos`` is on the name of the node, the label under the circle."""
+        if self._label_rect.isNull():
+            return False
+        pos = self.mapFromScene(scene_pos)
+        if not self._label_rect.contains(pos):
+            return False
+        # zoomed out, the label grows into the ring: the circle is not the name
+        return math.hypot(pos.x() - self._radius, pos.y() - self._radius) > self._radius
 
     def boundingRect(self):
         ring = QRectF(0.0, 0.0, self._width, self._height).adjusted(-RING_WIDTH, -RING_WIDTH,
@@ -402,10 +415,22 @@ class CWLNodeItem(NodeItem):
         self._refreshPortLabels()
         super().hoverEnterEvent(event)
 
+    def hoverMoveEvent(self, event):
+        self._setLabelHovered(self.labelClickable and self.isLabelAt(event.scenePos()))
+        super().hoverMoveEvent(event)
+
     def hoverLeaveEvent(self, event):
         self._hovered = False
+        self._setLabelHovered(False)
         self._refreshPortLabels()
         super().hoverLeaveEvent(event)
+
+    def _setLabelHovered(self, hovered):
+        if hovered == self._label_hovered:
+            return
+        self._label_hovered = hovered
+        self.setToolTip(self.labelToolTip if hovered else '')
+        self.update()
 
     # ---- selection --------------------------------------------------------
     def setFaded(self, faded, lit_ports=()):
@@ -461,6 +486,11 @@ class CWLNodeItem(NodeItem):
             x = -QFontMetricsF(label_font).horizontalAdvance(text) / 2
             colour = _color('faded_label') if self._faded else _color('label')
             _drawLabel(painter, QPointF(x, 0), label_font, text, colour)
+            if self._label_hovered:
+                # like a link: the name can be clicked
+                painter.setPen(QPen(colour, 1))
+                width = QFontMetricsF(label_font).horizontalAdvance(text)
+                painter.drawLine(QPointF(x, 3), QPointF(x + width, 3))
         painter.restore()
 
 

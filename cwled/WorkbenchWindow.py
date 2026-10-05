@@ -178,6 +178,28 @@ class WorkbenchWindow(QMainWindow):
             self.updateWorkspaceViews()
             self.statusBar().showMessage(f"Added {', '.join(added)} to the workspace", 5000)
 
+    def revealInWorkspace(self, file_path) -> bool:
+        """
+        Show a file in the Workspace panel of this window: the panel is shown,
+        the folders down to the file are expanded and the file is selected.
+
+        Returns:
+            True if the file was found in the workspace folders of this window.
+        """
+        self.sidebar.show()
+        self.sidebar.showWorkspace()
+        if self.sidebar.workspace_panel.revealFile(file_path):
+            return True
+        name = Path(str(file_path)).name
+        if not Path(str(file_path)).is_file():
+            message = f"{name} was not found"
+        elif not self.workspace.isInsideWorkspace(file_path):
+            message = f"{name} is not in a workspace folder of this window"
+        else:
+            message = f"{name} is not listed in the Workspace panel"
+        self.statusBar().showMessage(message, 5000)
+        return False
+
     def onOpenWorkspace(self):
         """Show the workspace browser in the side panel and rescan the workspace."""
         self.sidebar.show()

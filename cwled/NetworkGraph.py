@@ -101,6 +101,8 @@ class CWLGraph(QWidget):
         self.shown_ports = {}
         # Opens a step node in the workflow editor's step inspector (None: StepDialog)
         self.inspect_step = None
+        # the release that ends a double click is not a click on a name
+        self._ignore_release = False
 
         # Initialize the cwl_dict as an empty dictionary if none provided
         self.setCWL(cwl_workflow )
@@ -208,7 +210,12 @@ class CWLGraph(QWidget):
                 self.deleteSelection()
                 return True  # Event handled
 
+        elif event.type() == QEvent.Type.GraphicsSceneMouseDoubleClick:
+            # a double click opens the node (see onNodeDoubleClicked)
+            self._ignore_release = True
+
         elif event.type() == QEvent.Type.GraphicsSceneMousePress:
+            self._ignore_release = False
             item = self.graph.viewer().scene().itemAt(event.scenePos(), QTransform())
             # print(f"--- [EVENT_FILTER] MousePress on item: {type(item).__name__}")
             if isinstance(item, PortItem):
@@ -226,6 +233,10 @@ class CWLGraph(QWidget):
                 self.dragging_input_port = None
                 
         elif event.type() == QEvent.Type.GraphicsSceneMouseRelease :
+            if self._ignore_release:
+                self._ignore_release = False
+            else:
+                self._detectNameClick(event)
             if self.dragging_input_port or self.dragging_output_port:
                 scene = self.graph.viewer().scene()
                 pos = event.scenePos()
@@ -253,6 +264,58 @@ class CWLGraph(QWidget):
                 self.dragging_input_port = None
         return super().eventFilter(obj, event)
 
+
+    def _detectNameClick(self, event):
+        """
+        Tell when the name of a node (the label under the circle, nothing else)
+        was clicked: the left button is pressed and released on the name, without
+        moving the mouse (that is a drag of the node). Cmd/Ctrl + click opens the
+        step (see onNodeNameClicked); the other modifier keys select several nodes.
+        """
+        modifiers = event.modifiers()
+        if event.button() != Qt.MouseButton.LeftButton or modifiers not in (
+                Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.ControlModifier):
+            return
+        moved = event.screenPos() - event.buttonDownScreenPos(Qt.MouseButton.LeftButton)
+        if moved.manhattanLength() > QApplication.startDragDistance():
+            return
+        press = event.buttonDownScenePos(Qt.MouseButton.LeftButton)
+        for item in self.graph.viewer().scene().items(event.scenePos()):
+            if isinstance(item, GraphItems.CWLNodeItem):
+                # the node on top of the others at this point
+                if item.isLabelAt(event.scenePos()) and item.isLabelAt(press):
+                    node = self.graph.get_node_by_id(item.id)
+                    if node is not None:
+                        self.onNodeNameClicked(node, modifiers == Qt.KeyboardModifier.ControlModifier)
+                return
+
+    def onNodeNameClicked(self, node, open_step=False):
+        """
+        The name of a node was clicked. A step shows its tool or workflow file in
+        the Workspace panel of the window of this workflow. With ``open_step``
+        (Cmd/Ctrl + click) the step is opened instead: the file of its tool or
+        sub-workflow in a tab of the window, or, for a step that is defined inside
+        the workflow, its definition in the Code tab.
+        """
+        self.logger.debug(f"Name of node {node.name()} clicked (open: {open_step})")
+        if not isinstance(node, StepNode) or not node.cwl_filename:
+            return
+        window = self.window()
+        if open_step:
+            if not isinstance(getattr(node.cwl_step, 'run', None), str):
+                document = self.parentWidget()
+                while document is not None and not hasattr(document, 'showStepInCode'):
+                    document = document.parentWidget()
+                if document is not None:
+                    document.showStepInCode(shortId(node.cwl_step.id))
+                return
+            open_file = getattr(window, 'openFile', None)
+            if open_file is not None:
+                open_file(node.cwl_filename)
+            return
+        reveal = getattr(window, 'revealInWorkspace', None)
+        if reveal is not None:
+            reveal(node.cwl_filename)
 
     def createInputNodeFromDrag(self, scene_pos):
         """Create InputNode when input port is dragged to empty space."""

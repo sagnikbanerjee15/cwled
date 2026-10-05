@@ -1,3 +1,4 @@
+from PyQt6 import sip
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer, QObject, QPoint
 from PyQt6.QtWidgets import (
     QDialog, QTabWidget, QVBoxLayout, QHBoxLayout, 
@@ -567,6 +568,15 @@ class ChildWindow(QDialog):
         if parsed.scheme == 'file':
             return parsed.path
         return path_text
+
+    def showStepInCode(self, step_id: str) -> bool:
+        """Show the Code tab with the definition of a workflow step selected."""
+        if not hasattr(self, 'code_editor'):
+            return False
+        self.tabs.setCurrentWidget(self.code_editor)
+        # the tab change refreshes the code first
+        QTimer.singleShot(0, lambda: not sip.isdeleted(self.code_editor) and self.code_editor.showStep(step_id))
+        return True
 
     def workspaceDirectory(self):
         """

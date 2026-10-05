@@ -2,6 +2,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import *
 from PyQt6.QtGui import QAction, QIcon, QFont, QColor, QFontMetrics, QKeySequence
 from io import StringIO
+import re
 from PyQt6.Qsci import QsciScintilla, QsciLexerJavaScript,QsciLexerYAML
 import json
 import builtins
@@ -707,6 +708,38 @@ class CodeWindow( QWidget):
         
         return uri
     
+    def showStep(self, step_id: str) -> bool:
+        """
+        Select the definition of a workflow step in the editor: the line of the
+        step in the ``steps`` section (``echo:`` or ``- id: echo`` in YAML,
+        ``"echo":`` or ``"id": "echo"`` in JSON).
+
+        Returns:
+            True if the step was found.
+        """
+        lines = self.editor.text().splitlines()
+        name = re.escape(str(step_id))
+        if self.format == 'JSON':
+            section, patterns = r'^\s*"steps"\s*:', [rf'^\s*"{name}"\s*:', rf'^\s*"id"\s*:\s*"(?:[^"]*[#/])?{name}"']
+        else:
+            section = r'^steps\s*:'
+            patterns = [rf'^\s+[\'"]?{name}[\'"]?\s*:\s*(#.*)?$',
+                        rf'^\s*-\s*id\s*:\s*[\'"]?(?:[^\'"\s]*[#/])?{name}[\'"]?\s*(#.*)?$']
+        start = next((number for number, text in enumerate(lines) if re.match(section, text)), None)
+        if start is None:
+            return False
+        for number in range(start + 1, len(lines)):
+            text = lines[number]
+            if self.format != 'JSON' and text.strip() and not text[0].isspace() and not text.startswith('-'):
+                break       # the next top level key: the steps are over
+            if any(re.match(pattern, text) for pattern in patterns):
+                self.editor.ensureLineVisible(number)
+                self.editor.setCursorPosition(number, 0)
+                self.editor.setSelection(number, 0, number, len(text))
+                self.editor.setFocus()
+                return True
+        return False
+
     def jumpToField(self, field_name):
         """
         Jump to the specified field in the editor by searching for it and positioning the cursor.
