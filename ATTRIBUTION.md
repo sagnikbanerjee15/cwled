@@ -75,6 +75,29 @@ interface icons :
   
   <a href="https://www.flaticon.com/free-icons/commit-git" title="commit git icons">Commit git icons created by icon_small - Flaticon</a>
 
+### Rabix Composer look and feel — `cwled/theme.py`
+
+The user interface theme (colour palette, layout, typography and icon choice)
+reproduces the design of Rabix Composer, the CWL editor by Seven Bridges.
+No Composer source code is included; colour values were taken from its
+style sheets, the Ace "idle_fingers" editor theme and the cwl-svg
+"rabix-dark" graph theme.
+
+- Project: <https://github.com/rabix/composer>, <https://github.com/rabix/cwl-svg>
+- License: Apache License 2.0
+
+### Fonts — `resources/fonts/`
+
+Both fonts are the versions shipped with Rabix Composer.
+
+- **Montserrat** (`Montserrat-Regular.ttf`, `Montserrat-Light.ttf`), used for
+  titles. Copyright (c) 2014 Julieta Ulanovsky.
+  <https://github.com/JulietaUla/Montserrat> — SIL Open Font License 1.1
+  (`resources/fonts/OFL-Montserrat.txt`).
+- **Font Awesome 4.7.0** (`fontawesome-webfont.ttf`), used for icons.
+  Copyright (c) 2016 Dave Gandy. <https://fontawesome.com/v4/> — SIL Open
+  Font License 1.1 (`resources/fonts/OFL-FontAwesome.txt`).
+
 
 ## Runtime dependencies
 
