@@ -812,7 +812,7 @@ Graph emits editingFinished
 
 **Location**: `sshConfig.py`, `remoteFolders.py`, `RemoteFolderDialog.py`
 
-A folder of a remote machine (an EC2 instance of `~/.ssh/config`) is *mirrored*: its CWL documents are copied into a folder of the user's machine, which is then an ordinary workspace folder, so nothing else in the application has to know about ssh.
+A folder of a remote machine (an EC2 instance of `~/.ssh/config`) is *mirrored*: its CWL documents are copied, one level at a time and a level when it is opened, into a folder of the user's machine, which is then an ordinary workspace folder, so nothing else in the application has to know about ssh.
 
 ```
 "+ Add a Remote Folder (SSH)" below "+ Add a Folder" in the side panel (or the Welcome tab / context menu of the Workspace tree)
@@ -822,8 +822,9 @@ MainWindow.addRemoteFolder(host window) → RemoteFolderDialog
     │                                       classify() marks the EC2 instances (SshHost.ec2_level / ec2_reasons)
     ├─ RemoteFolderBrowser                  listDirectory() over ssh to pick the folder
     └─ RemoteFolders.addFolder(host, path)  (worker thread)
-           resolvePath() → pullFolder(): "find ... | tar -cf -" on the machine, read entry by entry here;
-           only plain files with a plain relative name, below the copy, are written
+           resolvePath() → pullLevels(): one level only, "find -maxdepth 1 ... | tar -cf - --no-recursion" on
+           the machine (the documents of the folder and its sub-folders), read entry by entry here;
+           only plain files and folders with a plain relative name, below the copy, are written
     ↓
 RemoteFolders.changed → every window's Workspace panel names the root "host:/path"
 MainWindow.addWorkspaceFolder(copy)         the copy becomes a workspace folder
@@ -836,7 +837,16 @@ pushFile(): "cat > tmp && mv tmp file" on the machine (keeps the mode of the old
     ↓
 uploaded / uploadFailed → status bar message / warning (the copy here keeps the change)
 
-Sync from Remote → RemoteFolders.sync() → pullFolder() again: where a file differs on both sides the newer wins
+Expanding a folder of a copy that was not read in this session (WorkspaceContents._on_item_expanded)
+    ↓
+remoteFolderOpened → MainWindow.loadRemoteFolder() → RemoteFolders.fetchLevel(folder)   ("Loading..." row meanwhile)
+    ↓
+pullLevels() of that folder → levelFetched → WorkspaceContents.reloadDirectory()   (levelFailed → showLoadFailure)
+(WorkspaceContents.remote_unfetched = RemoteFolders.isUnfetched makes such a folder listed although it is empty here;
+ revealFile() never reads folders: it is navigation, not the user opening them)
+
+Sync from Remote → RemoteFolders.sync() → pullLevels() again for the first level and the folders that were read:
+where a file differs on both sides the newer wins
 ```
 
 `Transport` runs a shell script on a machine: `SshTransport` is the `ssh` program (`BatchMode`, so it never asks for a password), `LocalTransport` runs the same scripts in a local shell, which is what the tests do (`pytests/test_remote_folders.py`). The list is kept in the configuration as `remote_folders` (`host`, `path`, `mirror`, `synced`); the copies live under `platformdirs.user_data_path('cwled')/remote/<host>/<path>`.

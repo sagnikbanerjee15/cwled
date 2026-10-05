@@ -67,6 +67,7 @@ class WorkbenchWindow(QMainWindow):
         self.sidebar.removeFolderRequested.connect(self.onRemoveWorkspaceFolder)
         self.sidebar.addRemoteFolderRequested.connect(self.onAddRemoteFolder)
         self.sidebar.syncRemoteFolderRequested.connect(self.controller.syncRemoteFolder)
+        self.sidebar.remoteFolderOpened.connect(self.controller.loadRemoteFolder)
         self.sidebar.currentFolderChanged.connect(self.onCurrentWorkspaceFolderChanged)
         self.sidebar.workspace_panel.followDocumentChanged.connect(
             lambda follow: follow and self.followCurrentDocument())
@@ -170,6 +171,7 @@ class WorkbenchWindow(QMainWindow):
         """Name the roots of the Workspace panel that are copies of remote folders."""
         remote = getattr(self.controller, 'remote', None)
         if remote is not None:
+            self.sidebar.workspace_panel.remote_unfetched = remote.isUnfetched
             self.sidebar.setRemoteLabels(remote.labels())
 
     def onAddRemoteFolder(self):

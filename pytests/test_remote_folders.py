@@ -65,38 +65,46 @@ class FailingTransport(rf.Transport):
 
 
 # ------------------------------------------------------------------------------------------------ the copying
-def test_the_documents_of_a_folder_are_copied_and_nothing_else(tmp_path, remote_dir):
+def test_one_level_is_copied_at_a_time_documents_and_the_names_of_the_folders(tmp_path, remote_dir):
     transport = rf.LocalTransport()
     mirror = tmp_path / 'mirror'
-    result = rf.pullFolder(transport, str(remote_dir), mirror)
-    assert mirror_files(mirror) == ['50-workflow.cwl', 'echo.cwl', 'tools/echo-copy.cwl', 'uppercase.cwl',
-                                    'with space/c d.cwl'], "no hidden folder, no node_modules, no other file, nothing large"
-    assert result.files == 5 and result.unchanged == 0 and not result.truncated
+    first = rf.pullLevels(transport, str(remote_dir), [''], mirror)
+    assert mirror_files(mirror) == ['50-workflow.cwl', 'echo.cwl', 'uppercase.cwl'], "only the documents of this level"
+    assert sorted(p.name for p in mirror.iterdir() if p.is_dir()) == ['tools', 'with space'], \
+        "the folders are there, empty; not the hidden one and not node_modules"
+    assert list((mirror / 'tools').iterdir()) == []
+    assert first.files == 3 and first.folders == 2 and not first.truncated
     assert (mirror / 'echo.cwl').read_text() == (remote_dir / 'echo.cwl').read_text()
     assert abs((mirror / 'echo.cwl').stat().st_mtime - (remote_dir / 'echo.cwl').stat().st_mtime) < 2
+    # a folder is read when it is opened; several can be read at once
+    second = rf.pullLevels(transport, str(remote_dir), ['tools', 'with space'], mirror)
+    assert second.files == 2 and mirror_files(mirror) == ['50-workflow.cwl', 'echo.cwl', 'tools/echo-copy.cwl',
+                                                           'uppercase.cwl', 'with space/c d.cwl']
+    assert not (mirror / '.hidden').exists() and not (mirror / 'node_modules').exists()
+    assert 'huge.json' not in str(mirror_files(mirror)) and 'notes.txt' not in str(mirror_files(mirror))
 
 
 def test_a_second_copy_changes_nothing_and_a_file_changed_here_is_kept(tmp_path, remote_dir):
     transport = rf.LocalTransport()
     mirror = tmp_path / 'mirror'
-    rf.pullFolder(transport, str(remote_dir), mirror)
-    again = rf.pullFolder(transport, str(remote_dir), mirror)
-    assert again.files == 0 and again.unchanged == 5
+    rf.pullLevels(transport, str(remote_dir), [''], mirror)
+    again = rf.pullLevels(transport, str(remote_dir), [''], mirror)
+    assert again.files == 0 and again.unchanged == 3
     # a change made here, not uploaded (the machine could not be reached): it must survive a sync
     (mirror / 'echo.cwl').write_text('changed here')
-    kept = rf.pullFolder(transport, str(remote_dir), mirror)
+    kept = rf.pullLevels(transport, str(remote_dir), [''], mirror)
     assert kept.kept_local == ['echo.cwl'] and (mirror / 'echo.cwl').read_text() == 'changed here'
     # a change made on the machine comes in
     (remote_dir / 'uppercase.cwl').write_text('changed there')
     import os, time
     later = time.time() + 60
     os.utime(remote_dir / 'uppercase.cwl', (later, later))
-    changed = rf.pullFolder(transport, str(remote_dir), mirror)
+    changed = rf.pullLevels(transport, str(remote_dir), [''], mirror)
     assert changed.files == 1 and (mirror / 'uppercase.cwl').read_text() == 'changed there'
 
 
 def test_what_the_remote_machine_sends_cannot_write_outside_the_copy(tmp_path):
-    """An archive with paths that lead out of the folder, links and devices: only the plain file is written."""
+    """An archive with paths that lead out of the folder, links and devices: only the plain entries are written."""
     class Hostile(rf.Transport):
         def argv(self, script):
             code = (
@@ -108,22 +116,31 @@ def test_what_the_remote_machine_sends_cannot_write_outside_the_copy(tmp_path):
                 "    tar.addfile(info, io.BytesIO(body) if kind == tarfile.REGTYPE else None)\n"
                 f"add('../escaped.cwl'); add('{tmp_path}/absolute.cwl'); add('a/../../up.cwl'); add('ok/fine.cwl', b'fine')\n"
                 "add('sym.cwl', kind=tarfile.SYMTYPE, link='/etc/hosts'); add('hard.cwl', kind=tarfile.LNKTYPE, link='ok/fine.cwl')\n"
-                "add('dev.cwl', kind=tarfile.CHRTYPE); add('notes.txt'); tar.close()\n")
+                "add('dev.cwl', kind=tarfile.CHRTYPE); add('notes.txt')\n"
+                "add('../newdir/x.cwl'); add('../evil-folder', kind=tarfile.DIRTYPE); add('ok-folder', kind=tarfile.DIRTYPE)\n"
+                "add('linkdir', kind=tarfile.SYMTYPE, link='/'); add('link/pwned.cwl'); tar.close()\n")
             return [sys.executable, '-c', code]
 
     mirror = tmp_path / 'deep' / 'mirror'
-    result = rf.pullFolder(Hostile(), '/anywhere', mirror)
-    assert mirror_files(mirror) == ['ok/fine.cwl'] and result.files == 1
-    assert len(result.skipped) == 7
-    assert not (tmp_path / 'deep' / 'escaped.cwl').exists() and not (tmp_path / 'absolute.cwl').exists()
-    assert not (tmp_path / 'up.cwl').exists() and not (tmp_path / 'deep' / 'up.cwl').exists()
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    mirror.mkdir(parents=True)
+    (mirror / 'link').symlink_to(outside)               # a link in the copy that leads out of it
+    result = rf.pullLevels(Hostile(), '/anywhere', [''], mirror)
+    assert mirror_files(mirror) == ['ok/fine.cwl'] and result.files == 1 and result.folders == 1
+    assert (mirror / 'ok-folder').is_dir()
+    assert len(result.skipped) == 11
+    for escaped in (tmp_path / 'deep' / 'escaped.cwl', tmp_path / 'absolute.cwl', tmp_path / 'up.cwl',
+                    tmp_path / 'deep' / 'up.cwl', tmp_path / 'deep' / 'newdir', tmp_path / 'deep' / 'evil-folder',
+                    outside / 'pwned.cwl'):
+        assert not escaped.exists(), f"{escaped} was written"
 
 
 def test_a_folder_that_does_not_exist_and_a_machine_that_cannot_be_reached_say_why(tmp_path):
     with pytest.raises(rf.RemoteError, match='cannot be opened'):
-        rf.pullFolder(rf.LocalTransport(), str(tmp_path / 'nope'), tmp_path / 'mirror')
+        rf.pullLevels(rf.LocalTransport(), str(tmp_path / 'nope'), [''], tmp_path / 'mirror')
     with pytest.raises(rf.RemoteError, match='no route to host'):
-        rf.pullFolder(FailingTransport(), '/x', tmp_path / 'mirror')
+        rf.pullLevels(FailingTransport(), '/x', [''], tmp_path / 'mirror')
     with pytest.raises(rf.RemoteError, match='no route to host'):
         rf.listDirectory(FailingTransport(), '~')
 
@@ -194,11 +211,13 @@ def test_adding_a_folder_copies_it_remembers_it_and_names_the_root(remote, remot
     assert folder.label == f"dev-box:{remote_dir.resolve()}"
     mirror = Path(folder.mirror)
     assert mirror.relative_to(remote.root).parts[0] == 'dev-box', "one folder per host, then the path on the host"
-    assert (mirror / 'echo.cwl').is_file()
+    assert mirror_files(mirror) == ['50-workflow.cwl', 'echo.cwl', 'uppercase.cwl'], "only the first level is read"
     assert cwled_config['remote_folders'] == [{'host': 'dev-box', 'path': str(remote_dir.resolve()),
                                               'mirror': folder.mirror, 'synced': folder.synced}]
     assert remote.labels() == {str(mirror.resolve()): folder.label}
     assert remote.folderFor(mirror / 'tools' / 'echo-copy.cwl') == folder
+    assert not remote.isUnfetched(mirror) and remote.isUnfetched(mirror / 'tools'), "the root was read, its folders were not"
+    assert not remote.isUnfetched(remote_dir), "a folder that is not in a copy is no concern of ours"
     assert remote.folderFor(remote_dir / 'echo.cwl') is None
     # adding it again gives the same folder, and a new manager reads the list from the configuration
     assert add(remote, 'dev-box', str(remote_dir))['folder'].mirror == folder.mirror and len(remote.folders()) == 1
@@ -215,20 +234,84 @@ def test_nothing_is_added_when_the_machine_cannot_be_reached_or_has_no_such_fold
     assert remote.folders() == []
 
 
-def test_a_sync_brings_in_what_changed_on_the_machine(remote, remote_dir):
+def test_a_folder_is_read_when_it_is_opened_and_only_once(remote, remote_dir):
     folder = add(remote, 'dev-box', str(remote_dir))['folder']
+    mirror = Path(folder.mirror)
+    assert remote.isUnfetched(mirror / 'tools') and list((mirror / 'tools').iterdir()) == []
+    read, failed = [], []
+    remote.levelFetched.connect(lambda path, result: read.append((path, result)))
+    remote.levelFailed.connect(lambda path, why: failed.append((path, why)))
+    assert remote.fetchLevel(mirror / 'tools')
+    assert not remote.fetchLevel(mirror / 'tools'), "it is being read: no second request"
+    wait_until(lambda: read)
+    assert read[0][0] == str(mirror / 'tools') and read[0][1].files == 1
+    assert (mirror / 'tools' / 'echo-copy.cwl').is_file() and not remote.isUnfetched(mirror / 'tools')
+    assert not remote.fetchLevel(mirror / 'tools'), "and not again once it was read"
+    assert remote.isUnfetched(mirror / 'with space'), "the other folders were not touched"
+    assert not (mirror / 'with space' / 'c d.cwl').exists()
+    assert not remote.fetchLevel(remote_dir / 'tools'), "only folders of a copy are read"
+    # when the machine cannot be reached it is said, and the folder can be tried again
+    remote.transportFor = lambda host: FailingTransport()
+    assert remote.fetchLevel(mirror / 'with space')
+    wait_until(lambda: failed)
+    assert 'no route to host' in failed[0][1] and remote.isUnfetched(mirror / 'with space')
+    remote.transportFor = lambda host: rf.LocalTransport()
+    assert remote.fetchLevel(mirror / 'with space')
+    wait_until(lambda: len(read) == 2)
+    assert (mirror / 'with space' / 'c d.cwl').is_file()
+
+
+def test_adding_a_large_folder_reads_one_level_only(remote, tmp_path):
+    big = tmp_path / 'remote' / 'big'
+    for number in range(60):
+        folder = big / f'sample-{number:02d}' / 'deep' / 'deeper'
+        folder.mkdir(parents=True)
+        for document in range(5):
+            (folder / f'doc-{document}.cwl').write_text('cwlVersion: v1.2\n')
+    (big / 'top.cwl').write_text('cwlVersion: v1.2\n')
+    result = {}
+    remote.synced.connect(lambda mirror, pulled: result.update(pulled=pulled))
+    folder = add(remote, 'dev-box', str(big))['folder']
+    mirror = Path(folder.mirror)
+    assert mirror_files(mirror) == ['top.cwl'], "the 300 documents below are not read yet"
+    assert len([p for p in mirror.iterdir() if p.is_dir()]) == 60 and result['pulled'].folders == 60
+
+
+def test_a_sync_reads_again_the_folders_that_were_opened_and_no_others(remote, remote_dir):
+    folder = add(remote, 'dev-box', str(remote_dir))['folder']
+    mirror = Path(folder.mirror)
+    remote.fetchLevel(mirror / 'tools')
+    wait_until(lambda: not remote.isUnfetched(mirror / 'tools'))
     (remote_dir / 'brand-new.cwl').write_text('cwlVersion: v1.2\n')
+    (remote_dir / 'tools' / 'new-tool.cwl').write_text('cwlVersion: v1.2\n')
+    (remote_dir / 'with space' / 'never-opened.cwl').write_text('cwlVersion: v1.2\n')
     done = []
-    remote.synced.connect(lambda mirror, result: done.append((mirror, result)))
+    remote.synced.connect(lambda path, result: done.append((path, result)))
     remote.sync(folder.mirror)
     wait_until(lambda: done)
-    assert done[0][1].files == 1 and (Path(folder.mirror) / 'brand-new.cwl').is_file()
+    assert (mirror / 'brand-new.cwl').is_file() and (mirror / 'tools' / 'new-tool.cwl').is_file()
+    assert not (mirror / 'with space' / 'never-opened.cwl').exists(), "a folder that was never opened is not read by a sync"
     failed = []
-    remote.syncFailed.connect(lambda mirror, why: failed.append(why))
+    remote.syncFailed.connect(lambda path, why: failed.append(why))
     remote.transportFor = lambda host: FailingTransport()
     remote.sync(folder.mirror)
     wait_until(lambda: failed)
     assert 'no route to host' in failed[0]
+
+
+def test_a_new_session_reads_a_folder_again_when_it_is_opened(remote, remote_dir):
+    folder = add(remote, 'dev-box', str(remote_dir))['folder']
+    mirror = Path(folder.mirror)
+    remote.fetchLevel(mirror / 'tools')
+    wait_until(lambda: not remote.isUnfetched(mirror / 'tools'))
+    later = rf.RemoteFolders(root=remote.root, transport_factory=lambda host: rf.LocalTransport())
+    assert later.isUnfetched(mirror) and later.isUnfetched(mirror / 'tools'), "what was read before is what is shown, not what is current"
+    assert (mirror / 'tools' / 'echo-copy.cwl').is_file()
+    seen = []
+    later.levelFetched.connect(lambda path, result: seen.append(result))
+    assert later.fetchLevel(mirror / 'tools')
+    wait_until(lambda: seen)
+    assert seen[0].unchanged == 1 and not later.isUnfetched(mirror / 'tools')
 
 
 def test_an_upload_writes_the_file_on_the_machine_and_a_failure_is_reported(remote, remote_dir):
@@ -393,3 +476,90 @@ def test_the_root_menu_and_the_menu_bar_offer_the_remote_folders(window, remote_
     panel.syncRemoteFolderRequested.emit(folder.mirror)
     wait_until(lambda: seen)
     assert (Path(folder.mirror) / 'later.cwl').is_file() and 'copied' in window.statusBar().currentMessage()
+
+
+def children(panel, index):
+    return [panel.model.index(row, 0, index).data() for row in range(panel.model.rowCount(index))]
+
+
+def remote_root(panel):
+    return next(panel.model.index(row, 0) for row in range(panel.model.rowCount())
+                if (panel.model.index(row, 0).data() or '').startswith('dev-box:'))
+
+
+def test_a_folder_of_the_machine_is_read_when_it_is_expanded_in_the_panel(window, remote_dir):
+    window.remote.transportFor = lambda host: rf.LocalTransport()
+    folder = add(window.remote, 'dev-box', str(remote_dir))['folder']
+    window.addWorkspaceFolder(folder.mirror)
+    pump(4)
+    panel = window.sidebar.workspace_panel
+    root = remote_root(panel)
+    panel.tree_view.expand(root)
+    assert children(panel, root) == ['tools', 'with space', '50-workflow.cwl', 'echo.cwl', 'uppercase.cwl'], \
+        "the first level, with its folders although they are empty here (nothing was read below them)"
+    tools = next(panel.model.index(row, 0, root) for row in range(panel.model.rowCount(root))
+                 if panel.model.index(row, 0, root).data() == 'tools')
+    panel.tree_view.expand(tools)
+    assert children(panel, tools) == ['Loading...'], "while the machine is asked"
+    wait_until(lambda: children(panel, tools) == ['echo-copy.cwl'], message=str(children(panel, tools)))
+    # collapsing and expanding again asks nothing more: it was read
+    asked = []
+    panel.remoteFolderOpened.connect(asked.append)
+    panel.tree_view.collapse(tools)
+    panel.tree_view.expand(tools)
+    pump(3)
+    assert asked == [] and children(panel, tools) == ['echo-copy.cwl']
+
+
+def test_a_folder_that_cannot_be_read_says_so_and_is_tried_again_when_expanded_again(window, remote_dir):
+    window.remote.transportFor = lambda host: rf.LocalTransport()
+    folder = add(window.remote, 'dev-box', str(remote_dir))['folder']
+    window.addWorkspaceFolder(folder.mirror)
+    pump(4)
+    panel = window.sidebar.workspace_panel
+    root = remote_root(panel)
+    panel.tree_view.expand(root)
+    space = next(panel.model.index(row, 0, root) for row in range(panel.model.rowCount(root))
+                 if panel.model.index(row, 0, root).data() == 'with space')
+    window.remote.transportFor = lambda host: FailingTransport()
+    panel.tree_view.expand(space)
+    wait_until(lambda: any(text.startswith('Could not be read') for text in children(panel, space)))
+    assert children(panel, space) == ['Could not be read: no route to host']
+    window.remote.transportFor = lambda host: rf.LocalTransport()
+    panel.tree_view.collapse(space)
+    panel.tree_view.expand(space)
+    wait_until(lambda: children(panel, space) == ['c d.cwl'], message=str(children(panel, space)))
+
+
+def test_showing_a_file_in_the_panel_does_not_read_the_folders_on_the_way(window, remote_dir):
+    window.remote.transportFor = lambda host: rf.LocalTransport()
+    folder = add(window.remote, 'dev-box', str(remote_dir))['folder']
+    mirror = Path(folder.mirror)
+    window.remote.fetchLevel(mirror / 'tools')
+    wait_until(lambda: not window.remote.isUnfetched(mirror / 'tools'))
+    window.addWorkspaceFolder(folder.mirror)
+    pump(4)
+    later = rf.RemoteFolders(root=window.remote.root, transport_factory=lambda host: rf.LocalTransport())
+    window.sidebar.workspace_panel.remote_unfetched = later.isUnfetched     # as in a new session: nothing is read yet
+    asked = []
+    window.sidebar.workspace_panel.remoteFolderOpened.connect(asked.append)
+    assert window.sidebar.workspace_panel.revealFile(mirror / 'tools' / 'echo-copy.cwl')
+    pump(3)
+    assert asked == [], "revealing is not the user opening folders: no network"
+
+
+def test_the_browser_chooses_the_folder_that_is_highlighted_else_the_one_shown(window, remote_dir):
+    window.remote.transportFor = lambda host: rf.LocalTransport()
+    parent = remote_dir.parent
+    browser = RemoteFolderBrowser(window.remote, 'dev-box', str(parent), window)
+    wait_until(lambda: browser.list.count())
+    assert browser.select_button.text() == 'Choose this folder'
+    item = next(browser.list.item(i) for i in range(browser.list.count()) if browser.list.item(i).text() == remote_dir.name)
+    browser.list.setCurrentItem(item)                                  # a click, not a double click
+    assert browser.select_button.text() == f"Choose \u201c{remote_dir.name}\u201d"
+    browser._choose()
+    assert browser.selected == str(remote_dir.resolve()), "the highlighted folder, not the one that is shown"
+    shown = RemoteFolderBrowser(window.remote, 'dev-box', str(remote_dir), window)
+    wait_until(lambda: shown.list.count())
+    shown._choose()
+    assert shown.selected == str(remote_dir.resolve()), "nothing highlighted: the folder that is shown"

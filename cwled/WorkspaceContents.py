@@ -94,6 +94,7 @@ class WorkspaceContents(QMainWindow):
     removeFolderRequested = pyqtSignal(str)  # "Remove from Workspace" on a workspace folder
     addRemoteFolderRequested = pyqtSignal()  # "Add a Remote Folder (SSH)" was chosen
     syncRemoteFolderRequested = pyqtSignal(str)  # "Sync from Remote" on the root of a remote folder
+    remoteFolderOpened = pyqtSignal(str)  # a folder of a copy of a remote folder that was not read yet was expanded
     currentFolderChanged = pyqtSignal(str)  # workspace folder of the selected item
     showHiddenChanged = pyqtSignal(bool)    # the "show hidden folders" setting changed
     followDocumentChanged = pyqtSignal(bool)  # the "follow the open document" setting changed
@@ -127,6 +128,7 @@ class WorkspaceContents(QMainWindow):
         self.follow_document = bool(configuration.get('workspace_follow_document', True))  # select the open document
         self._cwl_folders = {}            # folder -> does it hold documents (valid until the tree is rebuilt)
         self.remote_labels = {}           # copy of a remote folder -> "host:/path" (see remoteFolders.py)
+        self.remote_unfetched = lambda path: False   # is this folder of a remote copy not read from the machine yet?
         self._metadata_cache = {}         # file -> ((mtime, size), (class, version, format))
         self._watcher = QFileSystemWatcher(self)
         self._watcher.directoryChanged.connect(self._onFolderChanged)
@@ -612,7 +614,11 @@ class WorkspaceContents(QMainWindow):
             if not allow_hidden:
                 return False
             self.setShowHidden(True)
-        index = self._indexOfPath(str(target), expand=True)
+        self._revealing = True        # the folders that are expanded on the way are not opened by the user
+        try:
+            index = self._indexOfPath(str(target), expand=True)
+        finally:
+            self._revealing = False
         if index is None:
             return False
         if self._selectedPath() == index.siblingAtColumn(0).data(ROLE_PATH):
@@ -846,8 +852,49 @@ class WorkspaceContents(QMainWindow):
             finally:
                 QApplication.restoreOverrideCursor()
         
+        if (item and item.data(ROLE_IS_DIRECTORY) and not self._revealing
+                and self.remote_unfetched(item.data(ROLE_PATH))):
+            # a folder of a remote machine that was not read yet: what is here is what an earlier session left
+            if item.rowCount() == 0:
+                self._addInfoRow(item, "Loading...")
+            self.remoteFolderOpened.emit(item.data(ROLE_PATH))
+
         self._fitNameColumn()
-    
+
+    @staticmethod
+    def _addInfoRow(item, text: str):
+        """A row without a path (so no icon, not selectable as a file) under a folder: "Loading...", an error."""
+        row = QStandardItem(text)
+        row.setFlags(Qt.ItemFlag.NoItemFlags)
+        item.appendRow([row, QStandardItem(""), QStandardItem(""), QStandardItem("")])
+
+    def reloadDirectory(self, path):
+        """List a folder again (a folder of a remote copy that was just read); it keeps being expanded."""
+        if self._showing_search:
+            return
+        index = self._indexOfPath(str(path), expand=False)
+        item = self.model.itemFromIndex(index) if index is not None else None
+        if item is None:
+            return
+        self._cwl_folders.clear()
+        expanded = self._expandedPaths(index)
+        item.removeRows(0, item.rowCount())
+        self._load_directory_children(item, Path(str(path)))
+        item.setData(True, ROLE_IS_LOADED)
+        self._restoreExpansion(expanded, index)
+        self._fitNameColumn()
+
+    def showLoadFailure(self, path, why: str):
+        """Say under a folder of a remote copy why it could not be read (it is read again when it is expanded again)."""
+        index = self._indexOfPath(str(path), expand=False)
+        item = self.model.itemFromIndex(index) if index is not None else None
+        if item is None:
+            return
+        item.removeRows(0, item.rowCount())
+        self._load_directory_children(item, Path(str(path)))
+        first = why.strip().splitlines()[0] if why.strip() else "unknown error"
+        self._addInfoRow(item, f"Could not be read: {first}")
+
     def _isListedFolder(self, name: str) -> bool:
         """False for the folders the tree never lists (see IGNORED_FOLDERS) and, unless asked for, hidden ones."""
         return name not in IGNORED_FOLDERS and (self.show_hidden or not name.startswith('.'))
@@ -935,6 +982,8 @@ class WorkspaceContents(QMainWindow):
         Whether a directory or the folders below it hold any document. The answer
         is kept until the tree is rebuilt; folders that are not listed are skipped.
         """
+        if self.remote_unfetched(dir_path):
+            return True            # a folder of a remote machine that was not read yet: it may hold documents
         known = self._cwl_folders.get(dir_path)
         if known is not None:
             return known

@@ -112,6 +112,8 @@ class MainWindow(WorkbenchWindow):
         self.remote.changed.connect(self.updateRemoteViews)
         self.remote.synced.connect(self.onRemoteSynced)
         self.remote.syncFailed.connect(self.onRemoteSyncFailed)
+        self.remote.levelFetched.connect(self.onRemoteFolderRead)
+        self.remote.levelFailed.connect(self.onRemoteFolderFailed)
         self.remote.uploaded.connect(self.onRemoteUploaded)
         self.remote.uploadFailed.connect(self.onRemoteUploadFailed)
         theme.notifier.themeChanged.connect(self._refreshThemeMenus)
@@ -1176,6 +1178,30 @@ class MainWindow(WorkbenchWindow):
         if folder is not None:
             self.activeHost().statusBar().showMessage(f"Syncing {folder.label} ...", 0)
             self.remote.sync(folder.mirror)
+
+    def loadRemoteFolder(self, local_dir: str):
+        """A folder of a remote copy was opened in a Workspace panel: read it from the machine (if that is not done)."""
+        folder = self.remote.folderFor(local_dir)
+        if folder is not None and self.remote.fetchLevel(local_dir):
+            self.activeHost().statusBar().showMessage(f"Reading {folder.label}{self._remoteSubfolder(folder, local_dir)} ...", 0)
+
+    @staticmethod
+    def _remoteSubfolder(folder, local_dir: str) -> str:
+        relative = Path(local_dir).resolve().relative_to(Path(folder.mirror).resolve()).as_posix()
+        return '' if relative == '.' else f"/{relative}"
+
+    def onRemoteFolderRead(self, local_dir: str, result):
+        folder = self.remote.folderFor(local_dir)
+        if folder is not None:
+            self.activeHost().statusBar().showMessage(
+                f"{folder.label}{self._remoteSubfolder(folder, local_dir)}: {result.summary()}", 5000)
+        for window in self.workbenchWindows():
+            window.sidebar.workspace_panel.reloadDirectory(local_dir)
+
+    def onRemoteFolderFailed(self, local_dir: str, why: str):
+        self.activeHost().statusBar().showMessage(f"A folder of a remote machine could not be read: {why.splitlines()[0] if why else ''}", 10000)
+        for window in self.workbenchWindows():
+            window.sidebar.workspace_panel.showLoadFailure(local_dir, why)
 
     def syncRemoteFolders(self):
         if not self.remote.folders():

@@ -7,8 +7,12 @@ user's machine, and that copy is a workspace folder like any other. Everything t
 application does with a folder (the tree, search, opening, relative paths between
 workflows and tools, the file watcher) therefore works the same on it. What is different:
 
-* the copy is refreshed from the remote machine when it is added and by *Sync from
-  Remote* (a file that was changed here and not uploaded yet is kept, not overwritten);
+* the copy is made level by level: when the folder is added only its first level is read
+  (its documents, and its sub-folders as empty folders), and a sub-folder is read when it is
+  opened in the Workspace panel (``RemoteFolders.fetchLevel``), so that a large folder
+  appears at once;
+* the folders that were read are read again by *Sync from Remote* (a file that was changed
+  here and not uploaded yet is kept, not overwritten), and when they are opened in a later session;
 * saving a document of the copy uploads it to the remote machine at once;
 * the root of the folder in the Workspace panel is named ``host:/remote/path``.
 
@@ -19,8 +23,8 @@ or no passphrase) and the host key has to be known already (connect once in a te
 The remote machine needs nothing but a POSIX shell with ``find``, ``tar`` and ``cat``.
 
 Files that come from the remote machine are not trusted: the archive is read entry by
-entry, only regular files with a plain relative name are written, and only inside the
-copy of the folder.
+entry, only regular files and folders with a plain relative name are written, and only
+inside the copy of the folder.
 """
 import logging
 import os
@@ -43,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 SUFFIXES = ('.cwl', '.yml', '.yaml', '.json')       # the files that are copied
 MAX_FILE_BYTES = 2 * 1024 * 1024                    # larger files are not copied
-MAX_FILES = 5000                                    # a folder with more documents is cut here
+MAX_ENTRIES = 5000                                  # a folder with more documents and folders is cut here
 CONNECT_TIMEOUT = 15
 CONFIG_KEY = 'remote_folders'
 PART_SUFFIX = '.cwled-part'
@@ -179,31 +183,43 @@ def listDirectory(transport: Transport, path: str) -> Tuple[str, List[RemoteEntr
 class PullResult:
     files: int = 0                                         # files copied (new or changed)
     unchanged: int = 0                                     # files that were up to date
+    folders: int = 0                                       # sub-folders found (made here as empty folders)
     kept_local: List[str] = field(default_factory=list)    # files changed here and not uploaded: left alone
     skipped: List[str] = field(default_factory=list)       # entries that were refused (unsafe or too large)
-    truncated: bool = False                                # more than MAX_FILES documents: the rest is not copied
+    truncated: bool = False                                # more than MAX_ENTRIES in a folder: the rest is not read
 
     def summary(self) -> str:
         parts = [f"{self.files} file{'s' if self.files != 1 else ''} copied"]
         if self.unchanged:
             parts.append(f"{self.unchanged} up to date")
+        if self.folders:
+            parts.append(f"{self.folders} folder{'s' if self.folders != 1 else ''}")
         if self.kept_local:
             parts.append(f"{len(self.kept_local)} changed here, not overwritten")
         if self.skipped:
             parts.append(f"{len(self.skipped)} skipped")
         if self.truncated:
-            parts.append(f"only the first {MAX_FILES} documents")
+            parts.append(f"only the first {MAX_ENTRIES} entries of a folder")
         return ", ".join(parts)
 
 
-def _pullScript(path: str) -> str:
+def _levelScript(path: str) -> str:
+    """
+    The script that sends one level of each folder it is given on its input (relative to ``path``, one
+    per line, "." for ``path`` itself): the documents of the folder and its sub-folders, as a tar
+    archive without the contents of the sub-folders.
+    """
     names = ' -o '.join(f'-name "*{suffix}"' for suffix in SUFFIXES)
     blocks = MAX_FILE_BYTES // 512 + 1
+    folders = '-type d -not -name ".*" -not -name node_modules -not -name __pycache__'
+    files = f'-type f \\( {names} \\) -size -{blocks} -not -name ".*"'
     return (f'cd -- {remoteExpr(path)} >/dev/null || exit 3\n'
-            f'files=$(find . -type f \\( {names} \\) -size -{blocks} -not -path "*/.*" '
-            f'-not -path "*/node_modules/*" -not -path "*/__pycache__/*" | head -n {MAX_FILES + 1})\n'
-            f'[ -n "$files" ] || exit 0\n'
-            f'printf "%s\\n" "$files" | tar -cf - -T -\n')
+            f'list=$(while IFS= read -r d; do\n'
+            f'  [ -d "$d" ] || continue\n'
+            f'  find "$d" -mindepth 1 -maxdepth 1 \\( \\( {folders} \\) -o \\( {files} \\) \\) 2>/dev/null\n'
+            f'done | head -n {MAX_ENTRIES + 1})\n'
+            f'[ -n "$list" ] || exit 0\n'
+            f'printf "%s\\n" "$list" | tar -cf - --no-recursion -T -\n')
 
 
 def _safeRelativePath(name: str) -> Optional[PurePosixPath]:
@@ -217,25 +233,33 @@ def _safeRelativePath(name: str) -> Optional[PurePosixPath]:
     return PurePosixPath(*parts)
 
 
-def pullFolder(transport: Transport, remote_path: str, mirror: Path) -> PullResult:
+def pullLevels(transport: Transport, remote_path: str, folders: List[str], mirror: Path) -> PullResult:
     """
-    Copy the documents of a remote folder into ``mirror``. When a file differs on both sides the
-    newer one wins: a file that was changed here and could not be uploaded is kept, and a file that
-    was changed on the remote machine since is copied.
+    Copy one level of some folders of a remote folder into ``mirror``: the documents they hold and
+    their sub-folders (made here as empty folders, which are read when they are opened). ``folders``
+    are relative to ``remote_path``; ``''`` is the folder itself. When a file differs on both sides
+    the newer one wins: a file that was changed here and could not be uploaded is kept, and a file
+    that was changed on the remote machine since is copied.
     """
     result = PullResult()
     mirror = Path(mirror)
     mirror.mkdir(parents=True, exist_ok=True)
     root = mirror.resolve()
+    wanted = ['.' if not folder else './' + folder.strip('/') for folder in folders if '\n' not in folder]
     with tempfile.TemporaryFile() as errors:
-        process = transport.popen(_pullScript(remote_path), stdin=subprocess.DEVNULL, stderr=errors)
+        process = transport.popen(_levelScript(remote_path), stdin=subprocess.PIPE, stderr=errors)
         count = 0
         try:
+            try:
+                process.stdin.write(('\n'.join(wanted) + '\n').encode('utf-8'))
+                process.stdin.close()
+            except OSError:
+                pass                                        # the script ended already: its answer says why
             try:
                 with tarfile.open(fileobj=process.stdout, mode='r|') as archive:
                     for member in archive:
                         count += 1
-                        if count > MAX_FILES:
+                        if count > MAX_ENTRIES:
                             result.truncated = True
                             break
                         _extractMember(archive, member, root, result)
@@ -256,24 +280,33 @@ def pullFolder(transport: Transport, remote_path: str, mirror: Path) -> PullResu
     return result
 
 
+def _inside(path: Path, root: Path) -> bool:
+    """Whether a path, with the links it goes through resolved (also those that exist only in part), is in ``root``."""
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError):
+        return False
+    return resolved == root or root in resolved.parents
+
+
 def _extractMember(archive: tarfile.TarFile, member: tarfile.TarInfo, root: Path, result: PullResult):
-    if member.isdir():
-        return
     relative = _safeRelativePath(member.name)
-    if (not member.isreg() or relative is None or not str(relative).lower().endswith(SUFFIXES)
-            or member.size > MAX_FILE_BYTES):
+    if relative is None:
         result.skipped.append(member.name)
         return
     target = root.joinpath(*relative.parts)
-    parent = target.parent
-    parent.mkdir(parents=True, exist_ok=True)
-    try:
-        inside = parent.resolve() == root or root in parent.resolve().parents
-    except OSError:
-        inside = False
-    if not inside or target.is_symlink():
-        result.skipped.append(member.name)       # a link in the copy that leads somewhere else
+    if member.isdir():
+        if not _inside(target, root) or target.is_symlink():
+            result.skipped.append(member.name)
+            return
+        target.mkdir(parents=True, exist_ok=True)
+        result.folders += 1
         return
+    if (not member.isreg() or not str(relative).lower().endswith(SUFFIXES) or member.size > MAX_FILE_BYTES
+            or not _inside(target.parent, root) or target.is_symlink()):
+        result.skipped.append(member.name)       # not a plain document, or a link in the copy that leads elsewhere
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
     body = archive.extractfile(member).read()
     if target.exists():
         if target.read_bytes() == body:
@@ -368,6 +401,8 @@ class RemoteFolders(QObject):
     changed = pyqtSignal()                       # the list of remote folders changed
     synced = pyqtSignal(str, object)             # the copy that was refreshed, what was done (a PullResult)
     syncFailed = pyqtSignal(str, str)            # the copy that could not be refreshed, why
+    levelFetched = pyqtSignal(str, object)       # a folder of a copy was read (the local folder, a PullResult)
+    levelFailed = pyqtSignal(str, str)           # a folder of a copy could not be read, why
     uploaded = pyqtSignal(str, str)              # the file, where it went (label of the remote file)
     uploadFailed = pyqtSignal(str, str)          # the file, why
 
@@ -381,6 +416,9 @@ class RemoteFolders(QObject):
         self._pool.setMaxThreadCount(4)
         self._running = set()
         self._uploading: Dict[str, bool] = {}     # file -> another upload of it is waiting
+        self._mirror_keys: List[Tuple[str, RemoteFolder]] = []   # (resolved copy, folder), for quick tests of a path
+        self._fetched = set()                     # (resolved copy, folder in it) that were read in this session
+        self._fetching = set()                    # the same, being read now
         self.load()
 
     # -- the list ----------------------------------------------------------------------------------------------
@@ -393,6 +431,10 @@ class RemoteFolders(QObject):
                                                   float(entry.get('synced') or 0.0)))
             except (KeyError, TypeError, ValueError):
                 logger.warning(f"Ignoring an entry of {CONFIG_KEY} in the configuration: {entry!r}")
+        self._indexMirrors()
+
+    def _indexMirrors(self):
+        self._mirror_keys = [(str(Path(f.mirror).resolve()), f) for f in self._folders]
 
     def save(self):
         if data.configuration is None:
@@ -425,6 +467,9 @@ class RemoteFolders(QObject):
         """Forget a remote folder (the copy is left on the disk)."""
         key = str(Path(mirror))
         self._folders = [f for f in self._folders if str(Path(f.mirror)) != key]
+        self._indexMirrors()
+        resolved = str(Path(mirror).resolve())
+        self._fetched = {entry for entry in self._fetched if entry[0] != resolved}
         self.save()
         self.changed.emit()
 
@@ -442,16 +487,37 @@ class RemoteFolders(QObject):
         signals.done.connect(finished)
         self._pool.start(_Job(function, signals))
 
+    def _locate(self, local_dir) -> Optional[Tuple[str, RemoteFolder, str]]:
+        """(resolved copy, remote folder, folder relative to it) for a folder of a copy; None for any other path."""
+        text = os.fspath(local_dir)
+        for key, folder in self._mirror_keys:
+            if text == key:
+                return key, folder, ''
+            if text.startswith(key + os.sep):
+                return key, folder, text[len(key) + 1:].replace(os.sep, '/')
+        return None
+
+    def isUnfetched(self, local_dir) -> bool:
+        """
+        True for a folder of a copy that has not been read from the machine in this session: what is
+        here is what an earlier session left (a folder that was never opened has no document yet).
+        The path is compared as it is (the tree gives paths with their links resolved), because this is asked
+        for every folder that is listed, also those of the other workspace folders.
+        """
+        found = self._locate(local_dir)
+        return found is not None and (found[0], found[2]) not in self._fetched
+
     def addFolder(self, host: str, remote_path: str, callback: Callable[[Optional[RemoteFolder], Optional[Exception]], None]):
         """
-        Copy a remote folder and add it to the list. ``callback(folder, error)`` is called when it
-        is done; nothing is added when the copy fails (the machine cannot be reached, no such folder).
+        Add a remote folder: only its first level is read (the documents of the folder and the names of
+        its sub-folders), the others when they are opened (``fetchLevel``). ``callback(folder, error)``
+        is called when it is done; nothing is added when it fails (the machine cannot be reached, no such folder).
         """
         def work():
             transport = self.transportFor(host)
             absolute = resolvePath(transport, remote_path)
             mirror = self.mirrorFor(host, absolute)
-            result = pullFolder(transport, absolute, mirror)
+            result = pullLevels(transport, absolute, [''], mirror)
             return absolute, mirror, result
 
         def done(outcome, error):
@@ -461,8 +527,10 @@ class RemoteFolders(QObject):
             absolute, mirror, result = outcome
             folder = next((f for f in self._folders if f.host == host and f.path == absolute), None)
             if folder is None:
-                folder = RemoteFolder(host, absolute, str(mirror))
+                folder = RemoteFolder(host, absolute, str(Path(mirror).resolve()))     # with its links resolved
                 self._folders.append(folder)
+                self._indexMirrors()
+            self._fetched.add((str(Path(folder.mirror).resolve()), ''))
             folder.synced = _now()
             self.save()
             self.changed.emit()
@@ -471,19 +539,55 @@ class RemoteFolders(QObject):
 
         self.submit(work, done)
 
-    def sync(self, mirror: str):
-        """Copy the remote folder again; ``synced`` or ``syncFailed`` tells what became of it."""
-        folder = self.folderFor(mirror)
-        if folder is None:
-            return
+    def fetchLevel(self, local_dir) -> bool:
+        """
+        Read a folder of a copy from the machine (its documents and the names of its sub-folders), when it
+        is opened for the first time in the session. ``levelFetched`` or ``levelFailed`` tells what became of
+        it. False if nothing is to be done (not a folder of a copy, or read or being read already).
+        """
+        found = self._locate(os.path.realpath(local_dir))
+        if found is None:
+            return False
+        key, folder, relative = found
+        entry = (key, relative)
+        if entry in self._fetched or entry in self._fetching:
+            return False
+        self._fetching.add(entry)
+        local = os.fspath(local_dir)
 
         def work():
-            return pullFolder(self.transportFor(folder.host), folder.path, Path(folder.mirror))
+            return pullLevels(self.transportFor(folder.host), folder.path, [relative], Path(folder.mirror))
+
+        def done(result, error):
+            self._fetching.discard(entry)
+            if error is not None:
+                self.levelFailed.emit(local, str(error))
+                return
+            self._fetched.add(entry)
+            self.levelFetched.emit(local, result)
+
+        self.submit(work, done)
+        return True
+
+    def sync(self, mirror: str):
+        """
+        Read the remote folder again: its first level and the folders that were opened since (the others
+        are read when they are opened). ``synced`` or ``syncFailed`` tells what became of it.
+        """
+        found = self._locate(str(Path(mirror).resolve()))
+        if found is None:
+            return
+        key, folder, _relative = found
+        levels = sorted({relative for (copy, relative) in self._fetched if copy == key} | {''})
+
+        def work():
+            return pullLevels(self.transportFor(folder.host), folder.path, levels, Path(folder.mirror))
 
         def done(result, error):
             if error is not None:
                 self.syncFailed.emit(folder.mirror, str(error))
                 return
+            self._fetched.update((key, relative) for relative in levels)
             folder.synced = _now()
             self.save()
             self.synced.emit(folder.mirror, result)

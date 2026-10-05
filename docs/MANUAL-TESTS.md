@@ -590,13 +590,16 @@ Back up `~/.ssh/config` before editing it for these checks.
 
 ### Choosing and adding a folder
 
-- [ ] **O-07** 🖥 **Browse…** → the folders of the instance are listed (hidden ones too, files greyed); a double click goes into a folder, **Up** goes back, a path typed in the field + Return jumps there, **Choose this folder** fills the field.
-- [ ] **O-08** 🖥 **Add Folder** → the dialog shows "Copying…", then closes. The Workspace panel gets a root named `my-ec2:/home/…/cwl-test` with a server icon; its tooltip shows the remote path and where the copy is on this computer. Only the documents
-      of the folder are there (no `.git`, no hidden folders, no `node_modules`, no notes or images, nothing over 2 MB).
+- [ ] **O-07** 🖥 **Browse…** → the folders of the instance are listed (hidden ones too, files greyed); a double click goes into a folder, **Up** goes back, a path typed in the field + Return jumps there. **Click** a folder once (the button changes to
+      **Choose “name”**) and press it → the field gets *that* folder, not the one you were looking into (e.g. highlight `pipeline-assets` while looking into `/home/you/work` → `/home/you/work/pipeline-assets`);
+      with nothing highlighted the button says **Choose this folder** and takes the folder that is shown.
+- [ ] **O-08** 🖥 **Add Folder** → the dialog shows "Reading …", then closes (quickly, whatever the size of the folder: only its first level is read). The Workspace panel gets a root named `my-ec2:/home/…/cwl-test` with a server icon; its tooltip shows the remote path and where the copy is on this computer. Under it are the
+      documents of that folder and its sub-folders (no hidden folders, no `node_modules`, no notes or images, no document over 2 MB), also sub-folders that hold only other folders.
 - [ ] **O-09** 🖥 Open a document of the remote root, edit it, **Save** → the status bar says "Uploading to …" and then "Saved on my-ec2:/…". Check on the instance (`ssh my-ec2 cat ~/cwl-test/hello.cwl`) that the new content is there, and that
       the file keeps its owner and mode (`ls -l`).
 - [ ] **O-10** 🖥 **Save as…** a new name, inside a **new sub-folder** of the remote root → the file (and the folder) appear on the instance. **Save as** a name *outside* the remote root → nothing is uploaded.
-- [ ] **O-11** 🖥 On the instance, change a file and add one (`echo … > ~/cwl-test/new.cwl`); in CWLed right-click the remote root → **Sync from Remote** → the status bar says how many files were copied, `new.cwl` appears in the tree, and an open
+- [ ] **O-11** 🖥 On the instance, change a file and add one (`echo … > ~/cwl-test/new.cwl`; also one in a sub-folder you opened and one in a sub-folder you never opened); in CWLed right-click the remote root → **Sync from Remote** → the status bar says how many
+      files were copied, `new.cwl` and the new file of the opened sub-folder appear in the tree (the one of the never opened sub-folder appears when you open that folder), and an open
       document that changed asks whether to reload (as for any file changed by another program).
 - [ ] **O-12** 🖥 **File → Sync Remote Folders** syncs every remote folder; without a remote folder it says that the workspace has none.
 
@@ -609,6 +612,19 @@ Back up `~/.ssh/config` before editing it for these checks.
 - [ ] **O-16** 🖥 A host that needs `ProxyJump` (bastion) or an `aws ssm` ProxyCommand works exactly as `ssh <host>` does in a terminal (if you have one of these).
 - [ ] **O-17** A folder path that does not exist on the instance → "The folder … cannot be opened on …" in the dialog, nothing is added and no empty root appears.
 - [ ] **O-18** The dialog while a copy is running: **Cancel** and the window close button do nothing until the copy ends (known limitation: there is no way to cancel it).
+
+### Folders are read when they are opened
+
+- [ ] **O-25** 🖥 Add a folder of the instance that has **many sub-folders and thousands of documents** (a real project, a pipelines repository) → it is added in a few seconds (it used to take as long as copying everything). Only its first level is
+      on your disk afterwards (look in the data folder: the sub-folders are there, empty).
+- [ ] **O-26** 🖥 Expand a sub-folder → a *Loading…* row shows under it, the status bar says "Reading host:/…/sub-folder …", then the documents and sub-folders appear and the status bar says how many were copied. Expanding it again, or collapsing and
+      expanding, asks nothing more (the status bar stays quiet).
+- [ ] **O-27** 🖥 Sub-folders are listed before you open them, whatever they hold; one that turns out to hold no document is empty when opened (it stays as an empty folder until you rescan or restart).
+- [ ] **O-28** 🖥 Turn Wi-Fi off and expand a sub-folder you never opened → under it: "Could not be read: …" and the status bar says so (no dialog). Turn Wi-Fi on, collapse and expand it again → it is read.
+- [ ] **O-29** 🖥 Quit and start CWLed again, without a network connection → the remote root and the sub-folders you opened before show what was copied, and documents can be opened and edited (saving cannot upload, see O-13). With the network back,
+      expanding a sub-folder reads it again, once per session.
+- [ ] **O-30** 🖥 With a workflow of the remote folder open, click the **name** of a step or switch tabs (the panel follows the open document) → the file is shown in the panel without any reading from the instance (the status bar shows no "Reading …").
+- [ ] **O-31** The **search** of the panel finds documents of the folders you opened, not of the ones you never opened (known limitation: they are not on your computer yet).
 
 ### Afterwards
 

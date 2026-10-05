@@ -34,6 +34,8 @@ def _setStatus(label: QLabel, text: str, error: bool = False):
 class RemoteFolderBrowser(QDialog):
     """Pick a folder of a remote machine: the folders are listed with ssh, a double click opens one."""
 
+    CHOOSE_HERE = "Choose this folder"
+
     def __init__(self, remote: RemoteFolders, host: str, start: str = '~', parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Choose a folder on {host}")
@@ -57,13 +59,14 @@ class RemoteFolderBrowser(QDialog):
 
         self.list = QListWidget()
         self.list.itemDoubleClicked.connect(self._onDoubleClicked)
+        self.list.itemSelectionChanged.connect(self._updateChooseButton)
         layout.addWidget(self.list, 1)
         self.status = QLabel()
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
-        self.select_button = buttons.addButton("Choose this folder", QDialogButtonBox.ButtonRole.AcceptRole)
+        self.select_button = buttons.addButton(self.CHOOSE_HERE, QDialogButtonBox.ButtonRole.AcceptRole)
         self.select_button.setEnabled(False)
         buttons.accepted.connect(self._choose)
         buttons.rejected.connect(self.reject)
@@ -98,10 +101,20 @@ class RemoteFolderBrowser(QDialog):
                     item.setFlags(Qt.ItemFlag.NoItemFlags)           # shown for orientation only
                 self.list.addItem(item)
             self.select_button.setEnabled(True)
+            self._updateChooseButton()
             self.up_button.setEnabled(self.path not in ('', '/'))
             _setStatus(self.status, "")
 
         self.remote.submit(work, done)
+
+    def _highlightedFolder(self) -> Optional[str]:
+        """The folder that is highlighted in the list (a click selects it, a double click opens it), if any."""
+        items = [item for item in self.list.selectedItems() if item.data(Qt.ItemDataRole.UserRole)]
+        return str(PurePosixPath(self.path) / items[0].text()) if items and self.path else None
+
+    def _updateChooseButton(self):
+        folder = self._highlightedFolder()
+        self.select_button.setText(f"Choose \u201c{PurePosixPath(folder).name}\u201d" if folder else self.CHOOSE_HERE)
 
     def goUp(self):
         if self.path:
@@ -112,7 +125,8 @@ class RemoteFolderBrowser(QDialog):
             self.load(str(PurePosixPath(self.path) / item.text()))
 
     def _choose(self):
-        self.selected = self.path
+        """The folder that is highlighted, else the one that is shown."""
+        self.selected = self._highlightedFolder() or self.path
         self.accept()
 
 
@@ -135,8 +149,8 @@ class RemoteFolderDialog(QDialog):
 
         layout = QVBoxLayout(self)
         intro = QLabel("The CWL documents of a folder on another machine are copied to this computer and "
-                       "shown in the Workspace panel; saving a document uploads it again. The connection is made "
-                       "with ssh, with the settings of your SSH configuration.")
+                       "shown in the Workspace panel, one folder at a time as you open them; saving a document "
+                       "uploads it again. The connection is made with ssh, with the settings of your SSH configuration.")
         intro.setWordWrap(True)
         intro.setProperty('muted', True)
         layout.addWidget(intro)
@@ -332,7 +346,7 @@ class RemoteFolderDialog(QDialog):
     def addFolder(self):
         host = self.host()
         path = self.path_edit.text().strip() or '~'
-        self._setBusy(True, f"Copying the documents of {host}:{path} ...")
+        self._setBusy(True, f"Reading {host}:{path} ...")
 
         def done(folder, error):
             if sip.isdeleted(self):
