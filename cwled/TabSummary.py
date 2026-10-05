@@ -534,21 +534,24 @@ class WorkflowSummary( QWidget ):
         try:
             from MainWindow import ChildWindow
             
-            # Find the MainWindow instance
-            from MainWindow import MainWindow
+            # Find the window showing this document: the main window, or a
+            # window that tabs were torn off into. The step opens next to the
+            # workflow, in the same window; the main window owns the documents.
+            from WorkbenchWindow import WorkbenchWindow
+            host = None
             parent_window = None
             
-            # Try to find the MainWindow instance
             current = self
             while current:
-                if isinstance(current, MainWindow):
-                    parent_window = current
+                if isinstance(current, WorkbenchWindow):
+                    host = current
+                    parent_window = current.controller
                     break
                 current = current.parent()
                 
             if parent_window:
                 # Use the MainWindow's add_window_to_menu method
-                window_id = parent_window.add_window_to_menu(step_class)
+                window_id = parent_window.add_window_to_menu(step_class, host=host)
                 
                 # Now open the file in the new window
                 if window_id in parent_window.open_windows:

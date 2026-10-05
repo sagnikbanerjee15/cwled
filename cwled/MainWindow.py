@@ -1,11 +1,11 @@
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer, QSize, QMimeData, QUrl
+from PyQt6 import sip
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer, QSize, QRect
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QMenu, QVBoxLayout, QHBoxLayout, QDialog,
-    QFileDialog, QLabel, QPushButton, QWidget,QMessageBox, QSplitter,
-    QTabWidget, QTabBar, QStackedWidget, QListWidget, QListWidgetItem,
-    QToolButton, QFrame, QAbstractItemView, QScrollArea, QSizePolicy
+    QApplication, QInputDialog, QMenu, QMenuBar, QVBoxLayout, QHBoxLayout, QDialog,
+    QFileDialog, QLabel, QPushButton, QWidget,QMessageBox,
+    QToolButton, QFrame, QScrollArea, QSizePolicy
 )
-from PyQt6.QtGui import QAction, QIcon, QFont, QColor, QFontMetrics, QPixmap, QKeySequence
+from PyQt6.QtGui import QAction, QIcon, QFont, QColor, QFontMetrics, QPixmap, QKeySequence, QGuiApplication
 from pathlib import Path, PurePath
 from CWLparser import Parser
 import json
@@ -29,7 +29,8 @@ from typing import Union,List
 from pathlib import Path, PosixPath
 from TabWorkflowEditor import WorkflowEditor
 from ChildWindow import ChildWindow
-from WorkspaceContents import WorkspaceContents
+from DetachableTabs import DETACHABLE_PROPERTY, DetachableTabWidget, placeWindow
+from WorkbenchWindow import DetachedWindow, WorkbenchWindow
 import workspaceFolders
 from logger import ErrorDialogHandler
 from draft import DraftTool
@@ -39,22 +40,6 @@ import version
 import itertools
 import theme
 logger = logging.getLogger(__name__)
-
-
-class RecentFilesList(QListWidget):
-    """Recently opened files. They can be dragged, e.g. onto a workflow to
-    add them as steps."""
-
-    def __init__(self):
-        super().__init__()
-        self.setDragEnabled(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
-
-    def mimeData(self, items):
-        mime_data = QMimeData()
-        paths = [item.data(Qt.ItemDataRole.UserRole) for item in items]
-        mime_data.setUrls([QUrl.fromLocalFile(path) for path in paths if path])
-        return mime_data
 
 
 class CreationEntry(QFrame):
@@ -90,25 +75,33 @@ class CreationEntry(QFrame):
         super().mouseReleaseEvent(event)
 
 # class that defines the main window
-class MainWindow( QMainWindow):
+class MainWindow(WorkbenchWindow):
     '''
     class for the main window
     It hosts all the tabs menus etc
     When a menu action is triggered it passes a message to the downstream applications.
+
+    It also owns every document of the application, including the ones that
+    were torn off its tabs into a ``DetachedWindow``, and the menus of all the
+    windows, whose actions work on the document of the window they are used in.
     '''
     cwl_dict={}  # this is the cwl dictionary that we carry over in this window
     openWindowFromFile = pyqtSignal(str) # this signal will transfer the filename to open in a window
     def __init__(self , 
                  input_files:List[PosixPath|Path]=None,
                  export_image_file:str=None):
-        super().__init__()
+        super().__init__(workspaceFolders.PRIMARY)
         # load the configuration
         self.logger=logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(data.configuration.get('logLevel',{}).get(self.__class__.__name__, 'DEBUG'))
         self.setupGlobalErrorDialogLogging()
         self.open_windows={}
-        self.window_actions={}
+        self.window_titles={}      # window_id -> entry of the Window menu
         self.active_window=None
+        self.detached_windows=[]   # windows that tabs were torn off into
+        self._last_host=None       # the window that was last active
+        self._recent_menus=[]      # the Recent menu of every window
+        self._window_menus=[]      # the Window menu of every window
         self.logger.info(f"Setting up {self.__class__.__name__}")
         self.logger.info(f"Logging level set to {logging.getLevelName(self.logger.level)}")
         self.openWindowFromFile.connect( self.onCreateWindowFromFile )
@@ -194,28 +187,12 @@ class MainWindow( QMainWindow):
         Build the Rabix Composer style main window: a side panel with the
         workspace browser on the left, a tab bar with the open documents
         ("workbox") on the right and a status bar at the bottom.
-        Documents open as tabs instead of separate windows.
+        Documents open as tabs instead of separate windows; a tab can be
+        dragged out to a window of its own (see DetachedWindow).
         """
         self.resize(self._initialSize())
-
-        splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        splitter.setObjectName('mainSplitter')
-        splitter.setHandleWidth(1)
-        splitter.setChildrenCollapsible(False)
-
-        self.sidebar = self._buildSidebar()
-        splitter.addWidget(self.sidebar)
-
-        self.workbox = QTabWidget(self)
-        self.workbox.setObjectName('workbox')
-        self.workbox.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.workbox.setTabsClosable(True)
-        self.workbox.setMovable(True)
-        self.workbox.setUsesScrollButtons(True)
-        self.workbox.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
-        self.workbox.tabBar().setExpanding(False)
-        self.workbox.tabCloseRequested.connect(self.onWorkboxTabClose)
-        self.workbox.currentChanged.connect(self.onWorkboxCurrentChanged)
+        self.buildWorkbench()
+        self.workbox = self.tabs
 
         new_tab_button = QToolButton(self.workbox)
         new_tab_button.setIcon(theme.icon('plus', color=theme.TEXT_MUTED, active_color=theme.WHITE))
@@ -224,24 +201,13 @@ class MainWindow( QMainWindow):
         new_tab_button.clicked.connect(self.showWelcomeTab)
         self.workbox.setCornerWidget(new_tab_button, Qt.Corner.TopRightCorner)
 
+        # the start page belongs to the main window
         self.welcome = self._buildWelcomePage()
+        self.welcome.setProperty(DETACHABLE_PROPERTY, False)
         self.showWelcomeTab()
-        splitter.addWidget(self.workbox)
-
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([270, max(400, self.width() - 270)])
-        self.setCentralWidget(splitter)
-
-        # Status bar (Composer: ct-status-bar)
-        status_bar = self.statusBar()
-        status_bar.setSizeGripEnabled(False)
-        status_bar.setFixedHeight(theme.STATUS_BAR_HEIGHT)
-        self.workspace_status = QLabel()
-        status_bar.addWidget(self.workspace_status, 1)
         version_status = QLabel(f"CWLed {version.__version__}")
         version_status.setProperty('muted', True)
-        status_bar.addPermanentWidget(version_status)
+        self.statusBar().addPermanentWidget(version_status)
         self.updateWorkspaceViews()
         self.updateRecentLists()
 
@@ -259,66 +225,6 @@ class MainWindow( QMainWindow):
             width = min(width, int(available.width() * 0.95))
             height = min(height, int(available.height() * 0.95))
         return QSize(max(900, width), max(600, height))
-
-    def _buildSidebar(self) -> QWidget:
-        """Left panel: application title, then 'Workspace' / 'Recent' panels."""
-        sidebar = QWidget(self)
-        sidebar.setObjectName('sidebar')
-        sidebar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        sidebar.setMinimumWidth(200)
-        layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        title_bar = QWidget(sidebar)
-        title_bar.setObjectName('titleBar')
-        title_bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        title_bar.setFixedHeight(theme.ACTION_BAR_HEIGHT)
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(0, 0, 0, 0)
-        app_title = QLabel(
-            f'<span style="font-family:\'{theme.TITLE_FONT_FAMILY}\'">CWL</span>'
-            f'<span style="font-family:\'{theme.TITLE_FONT_FAMILY}\'; font-weight:300">ed</span>'
-        )
-        app_title.setObjectName('appTitle')
-        title_font = QFont(theme.TITLE_FONT_FAMILY)
-        title_font.setPointSizeF(QApplication.font().pointSizeF() + 2)
-        app_title.setFont(title_font)
-        title_layout.addWidget(app_title)
-        layout.addWidget(title_bar)
-
-        # Panel selector (Composer: "My Projects | Public Apps")
-        self.sidebar_tabs = QTabBar(sidebar)
-        self.sidebar_tabs.setExpanding(True)
-        self.sidebar_tabs.setDrawBase(False)
-        self.sidebar_tabs.addTab("Workspace")
-        self.sidebar_tabs.addTab("Recent")
-        layout.addWidget(self.sidebar_tabs)
-
-        self.sidebar_pages = QStackedWidget(sidebar)
-        self.sidebar_tabs.currentChanged.connect(self.sidebar_pages.setCurrentIndex)
-
-        # one root per workspace folder (Composer "Local Files")
-        self.workspace_panel = WorkspaceContents(workspace_path=workspaceFolders.folders(), parent=sidebar, sidebar=True)
-        self.workspace_panel.setWindowFlags(Qt.WindowType.Widget)
-        self.workspace_panel.fileSelected.connect(self.onCreateWindowFromFile)
-        self.workspace_panel.addFolderRequested.connect(self.onAddWorkspaceFolder)
-        self.workspace_panel.removeFolderRequested.connect(self.onRemoveWorkspaceFolder)
-        self.workspace_panel.currentFolderChanged.connect(self.onCurrentWorkspaceFolderChanged)
-        self.sidebar_pages.addWidget(self.workspace_panel)
-
-        self.recent_panel = self._buildRecentList()
-        self.sidebar_pages.addWidget(self.recent_panel)
-        layout.addWidget(self.sidebar_pages, 1)
-        return sidebar
-
-    def _buildRecentList(self) -> QListWidget:
-        recent_list = RecentFilesList()
-        recent_list.setIconSize(QSize(16, 16))
-        recent_list.itemDoubleClicked.connect(
-            lambda item: self.onOpenRecentFile(item.data(Qt.ItemDataRole.UserRole)))
-        self._recent_lists = getattr(self, '_recent_lists', []) + [recent_list]
-        return recent_list
 
     def _buildWelcomePage(self) -> QWidget:
         """
@@ -370,7 +276,8 @@ class MainWindow( QMainWindow):
         recent = QVBoxLayout()
         recent.setSpacing(8)
         recent.addWidget(theme.styleTitle(QLabel("Recently Opened")))
-        recent.addWidget(self._buildRecentList(), 1)
+        self.welcome_recent_list = self.sidebar.buildRecentList()
+        recent.addWidget(self.welcome_recent_list, 1)
         columns.addLayout(recent, 1)
         content_layout.addLayout(columns, 1)
 
@@ -446,24 +353,10 @@ class MainWindow( QMainWindow):
         self.workbox.setCurrentIndex(index)
 
     def updateWorkspaceViews(self):
-        """Refresh every view showing the workspace folders."""
-        self._updateWorkspaceStatus()
+        """Refresh every view showing the workspace folders of the main window."""
+        super().updateWorkspaceViews()
         if hasattr(self, 'welcome_workspace_folders'):
             self._refreshWelcomeWorkspace()
-        if hasattr(self, 'workspace_panel'):
-            self.workspace_panel.setWorkspaceFolders(workspaceFolders.folders())
-
-    def _updateWorkspaceStatus(self):
-        """Status bar: the current workspace folder (where new files go) and the number of others."""
-        if not hasattr(self, 'workspace_status'):
-            return
-        folders = workspaceFolders.folders()
-        text = f"Workspace: {workspaceFolders.currentFolder() or 'no folder'}"
-        if len(folders) > 1:
-            others = len(folders) - 1
-            text += f"  (+{others} more folder{'s' if others > 1 else ''})"
-        self.workspace_status.setText(text)
-        self.workspace_status.setToolTip("Workspace folders:\n" + "\n".join(folders) if folders else "")
 
     def _refreshWelcomeWorkspace(self):
         """Start page: one row per workspace folder."""
@@ -472,7 +365,7 @@ class MainWindow( QMainWindow):
             item = layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        folders = workspaceFolders.folders()
+        folders = self.workspace.folders()
         if not folders:
             empty_label = QLabel("No folders in the workspace.")
             empty_label.setProperty('muted', True)
@@ -503,20 +396,14 @@ class MainWindow( QMainWindow):
         self.welcome_workspace_scroll.setMaximumHeight(row_height * min(4, max(1, len(folders))))
 
     def updateRecentLists(self):
-        """Refresh the 'Recent' side panel and the start page list."""
+        """Refresh the 'Recent' side panel of every window and the start page list."""
         recent_files = [f for f in reversed(data.configuration.get('recents', []) or [])
                         if self._fileExists(f)]
-        for recent_list in getattr(self, '_recent_lists', []):
-            recent_list.clear()
-            for file_path in recent_files:
-                item = QListWidgetItem(theme.icon('file-o', color=theme.SMOKE), Path(file_path).name)
-                item.setToolTip(str(file_path))
-                item.setData(Qt.ItemDataRole.UserRole, str(file_path))
-                recent_list.addItem(item)
-            if not recent_files:
-                placeholder = QListWidgetItem("No recent files")
-                placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
-                recent_list.addItem(placeholder)
+        if hasattr(self, 'welcome_recent_list'):
+            self.welcome_recent_list.setFiles(recent_files)
+        for window in self.workbenchWindows():
+            if hasattr(window, 'sidebar'):
+                window.sidebar.setRecentFiles(recent_files)
 
     @staticmethod
     def _fileExists(file_path) -> bool:
@@ -541,45 +428,165 @@ class MainWindow( QMainWindow):
         return theme.icon(icon_key)
 
     def _refreshDocumentTab(self, window: ChildWindow):
-        index = self.workbox.indexOf(window)
+        """Update the title, icon and tool tip of the tab of a document, in whichever window it is."""
+        tabs = DetachableTabWidget.tabsOf(window)
+        index = tabs.indexOf(window) if tabs is not None else -1
         if index < 0:
             return
-        self.workbox.setTabText(index, self._documentTitle(window))
-        self.workbox.setTabIcon(index, self._documentIcon(window))
-        self.workbox.setTabToolTip(index, window.windowTitle())
+        tabs.setTabText(index, self._documentTitle(window))
+        tabs.setTabIcon(index, self._documentIcon(window))
+        tabs.setTabToolTip(index, window.windowTitle())
+        host = tabs.window()
+        if isinstance(host, WorkbenchWindow):
+            host.updateTitle()
 
     def _showDocument(self, window: ChildWindow):
-        """Bring a document tab to the front."""
-        if self.workbox.indexOf(window) >= 0:
-            self.workbox.setCurrentWidget(window)
+        """Bring a document tab to the front, in whichever window it is."""
+        tabs = DetachableTabWidget.tabsOf(window)
+        if tabs is not None and tabs.indexOf(window) >= 0:
+            tabs.setCurrentWidget(window)
+            host = tabs.window()
+            host.raise_()
+            host.activateWindow()
             self.active_window = window
             window.setFocus()
         else:
             window.raise_()
             window.activateWindow()
 
-    def onWorkboxTabClose(self, index: int):
+    def tabWindowLabel(self) -> str:
+        return "Main Window"
+
+    def workbenchWindows(self) -> List[WorkbenchWindow]:
+        """The main window and the windows that tabs were torn off into."""
+        return [self] + [window for window in self.detached_windows if not sip.isdeleted(window)]
+
+    def activeHost(self) -> WorkbenchWindow:
+        """The window the user works in: where new documents and the menu actions go."""
+        window = QApplication.activeWindow()
+        while window is not None:
+            if isinstance(window, WorkbenchWindow):
+                self._last_host = window
+                return window
+            window = window.parentWidget()
+        host = self._last_host
+        if host is not None and not sip.isdeleted(host) and host.isVisible():
+            return host
+        return self
+
+    def _dialogParent(self) -> QWidget:
+        """The parent of the dialogs of the menu actions: the window they were used in."""
+        return self.activeHost()
+
+    def _warnNoDocument(self):
+        QMessageBox.warning(self._dialogParent(), "No Document", "Please select a document first.")
+
+    def closeTab(self, tabs: DetachableTabWidget, index: int):
         """Close a document tab; the document may veto it (unsaved changes)."""
-        widget = self.workbox.widget(index)
+        widget = tabs.widget(index)
         if widget is None:
             return
         if widget is self.welcome:
-            self.workbox.removeTab(index)
+            tabs.removeTab(index)
+            return
             return
         # ChildWindow.closeEvent prompts for unsaved changes and emits
         # windowClosed, which removes the tab (remove_window_from_menu).
         widget.close()
 
-    def onWorkboxCurrentChanged(self, index: int):
-        widget = self.workbox.widget(index)
+
+    def onMenuCloseTab(self):
+        host = self.activeHost()
+        self.closeTab(host.tabs, host.tabs.currentIndex())
+
+    def onTabsCurrentChanged(self, host: WorkbenchWindow):
+        """The selected tab of a window changed."""
+        if host is not self.activeHost():
+            return
+        widget = host.tabs.currentWidget()
         self.active_window = widget if isinstance(widget, ChildWindow) else None
 
+    def createDetachedWindow(self, source_tabs: DetachableTabWidget, widget: QWidget):
+        """
+        The window for a tab that is torn off ``source_tabs``. Its workspace
+        starts as a copy of the one of the window the tab comes from (with the
+        folder of the document as the current one). Returns its tab widget.
+        """
+        source = source_tabs.window()
+        source_workspace = source.workspace if isinstance(source, WorkbenchWindow) else self.workspace
+        workspace = source_workspace.copy()
+        file_path = getattr(widget, 'file_path', None)
+        folder = workspace.containingFolder(file_path) if file_path else None
+        if folder:
+            workspace.setCurrentFolder(folder)
+        size = source.size()
+        screen = source.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            size = QSize(min(size.width(), int(available.width() * 0.9)),
+                         min(size.height(), int(available.height() * 0.9)))
+        window = self._newDetachedWindow(workspace)
+        window.resize(size)
+        window.move(source.x() + 40, source.y() + 40)
+        self.logger.info(f"Tab {widget.windowTitle()!r} detached to a new window "
+                         f"(workspace: {', '.join(workspace.folders())})")
+        return window.tabs
+
+    def _newDetachedWindow(self, workspace) -> DetachedWindow:
+        """An empty window for tabs, with the given workspace; the caller sizes and shows it."""
+        window = DetachedWindow(self, workspace)
+        self.detached_windows.append(window)
+        self.updateRecentLists()
+        self.refreshWindowMenus()
+        return window
+
+    def tileWindows(self):
+        """Arrange the windows side by side, as wide as the screen allows: the main window on the left."""
+        windows = [window for window in self.workbenchWindows()
+                   if window.isVisible() and not window.isMinimized()]
+        if len(windows) < 2:
+            return
+        active = self.activeHost()
+        screen = active.screen() or QApplication.primaryScreen()
+        available = screen.availableGeometry()
+        width = available.width() // len(windows)
+        for number, window in enumerate(windows):
+            last = number == len(windows) - 1
+            frame = QRect(available.left() + number * width, available.top(),
+                          available.width() - number * width if last else width, available.height())
+            placeWindow(window, frame, within=available)
+        widest = max(window.frameGeometry().width() for window in windows)
+        if widest > width + 2:
+            # the windows cannot be that narrow: spread them over the screen, overlapping like a staircase
+            last_x = available.right() + 1 - windows[-1].frameGeometry().width()
+            for number, window in enumerate(windows):
+                window.move(available.left() + round(number * (last_x - available.left()) / (len(windows) - 1)), window.y())
+        active.raise_()
+        active.activateWindow()
+
+    def onDetachedWindowClosed(self, window: DetachedWindow):
+        """A window that tabs were torn off into is gone."""
+        if window in self.detached_windows:
+            self.detached_windows.remove(window)
+        if self._last_host is window:
+            self._last_host = None
+        QTimer.singleShot(0, self.refreshWindowMenus)
+
+    def reattachAllWindows(self):
+        """Move the tabs of every detached window back to the main window."""
+        for window in list(self.detached_windows):
+            if not sip.isdeleted(window):
+                window.reattachAll()
+
     def closeEvent(self, event):
-        """Closing the main window closes every document (each may veto)."""
+        """Closing the main window closes every document (each may veto it)."""
         for window in list(self.open_windows.values()):
             if isinstance(window, ChildWindow) and not window.close():
                 event.ignore()
                 return
+        for window in list(self.detached_windows):
+            if not sip.isdeleted(window):
+                window.close()
         super().closeEvent(event)
 
     def setupGlobalErrorDialogLogging(self):
@@ -607,6 +614,14 @@ class MainWindow( QMainWindow):
         Respond to a message to create new window from a file.
         If the file is already open in an existing window, bring that window forward.
         '''
+        self.openDocument(input_file)
+
+    def openDocument(self, input_file:str, host:WorkbenchWindow=None, recent:bool=True):
+        '''
+        Open a file as a tab of ``host`` (by default the window the user works in).
+        If the file is already open, in whichever window, that tab is brought forward.
+        With ``recent`` False the file is not added to the recent files.
+        '''
         # Check if the file is already open in an existing window
         resolved_path = str(Path(input_file).resolve())
         for window in self.open_windows.values():
@@ -615,12 +630,12 @@ class MainWindow( QMainWindow):
                     self._showDocument(window)
                     return
 
-        child_window_id=self.add_window_to_menu()
+        child_window_id=self.add_window_to_menu(host=host)
         # self.active_window.file_path=input_file
         self.open_windows[child_window_id].menuOpenFile.emit(input_file)
         
         # Add file to recent files and update the menu
-        if data.configuration_manager:
+        if recent and data.configuration_manager:
             data.configuration_manager.addRecentFile(input_file)
             self.updateRecentMenu()
 
@@ -628,151 +643,186 @@ class MainWindow( QMainWindow):
         '''
         set the menu in the main application
         '''
-        file_open=QAction(  "&Open file ...",self)
+        self.buildMenuBar(self.menu, self)
+
+    def buildMenuBar(self, menu_bar:QMenuBar, owner:QWidget):
+        '''
+        Fill a menu bar with the menus of the application.
+
+        The main window and every window that tabs were torn off into has a
+        menu bar of its own (on macOS a window without one shows no menus), with
+        its own actions so that the shortcuts work in each of them. All of them
+        work on the document of the window they are used in (see activeHost).
+
+        Args:
+            menu_bar: the menu bar to fill.
+            owner: the window of the menu bar, which owns the actions.
+        '''
+        file_open=QAction(  "&Open file ...",owner)
         file_open.setShortcut(QKeySequence.StandardKey.Open)
         file_open.triggered.connect(self.onMenuOpenFile)
-        file_save=QAction(  "&Save",self)
+        file_save=QAction(  "&Save",owner)
         file_save.setShortcut(QKeySequence.StandardKey.Save)
         file_save.triggered.connect(self.onMenuSaveFile)
-        file_saveas=QAction(  "Save as ...",self)
+        file_saveas=QAction(  "Save as ...",owner)
         file_saveas.setShortcut(QKeySequence.StandardKey.SaveAs)
         file_saveas.triggered.connect(self.onMenuSaveAsFile)
-        file_reload=QAction(  "Reload file",self)
+        file_reload=QAction(  "Reload file",owner)
         file_reload.setShortcut(QKeySequence.StandardKey.Refresh)
         file_reload.triggered.connect(self.onMenuReloadFile)
-        file_add_folder=QAction(  "Add Folder to Workspace...",self)
+        file_add_folder=QAction(  "Add Folder to Workspace...",owner)
         file_add_folder.setToolTip("Add a folder to the workspace")
-        file_add_folder.triggered.connect(self.onAddWorkspaceFolder)
-        file_close=QAction(  "Close tab",self)
+        file_add_folder.triggered.connect(owner.onAddWorkspaceFolder)
+        file_close=QAction(  "Close tab",owner)
         file_close.setShortcut(QKeySequence.StandardKey.Close)
-        file_close.triggered.connect(lambda: self.onWorkboxTabClose(self.workbox.currentIndex()))
-        file_exit=QAction(  "E&xit",self)
+        file_close.triggered.connect(self.onMenuCloseTab)
+        file_exit=QAction(  "E&xit",owner)
         file_exit.setShortcut(QKeySequence.StandardKey.Quit)
         file_exit.setMenuRole(QAction.MenuRole.QuitRole)
         file_exit.triggered.connect(self.close)
         # create a submenu for New
         
 
-        tools_validate=QAction(  "Validate tool",self)
+        tools_validate=QAction(  "Validate tool",owner)
         tools_validate.triggered.connect(self.onMenuValidate)
-        tools_maketemplate=QAction(  "Generate template",self)
+        tools_maketemplate=QAction(  "Generate template",owner)
         tools_maketemplate.triggered.connect(self.onMenuMakeTemplate)
         
-        tools_upgrade=QAction(  "Upgrade CWL version",self)
+        tools_upgrade=QAction(  "Upgrade CWL version",owner)
         tools_upgrade.triggered.connect(self.onMenuUpgradeVersion)
-        tools_pack_workflow=QAction(  "Pack workflow to single file",self)
+        tools_pack_workflow=QAction(  "Pack workflow to single file",owner)
         tools_pack_workflow.triggered.connect(self.onMenuPackWorkflow)
-        tools_restructure_workflow=QAction(  "Repackage workflow with all tools",self)
+        tools_restructure_workflow=QAction(  "Repackage workflow with all tools",owner)
         tools_restructure_workflow.triggered.connect(self.onMenuRestructureWorkflow)
-        tools_save_documentation=QAction(  "Save workflow documentation",self)
+        tools_save_documentation=QAction(  "Save workflow documentation",owner)
         tools_save_documentation.triggered.connect(self.onMenuSaveDocumentation)
-        tools_configuration=QAction( "Configuration",self)
+        tools_configuration=QAction( "Configuration",owner)
         tools_configuration.setShortcut(QKeySequence.StandardKey.Preferences)
         tools_configuration.triggered.connect(self.onMenuConfiguration)
-        tools_reset_configuration=QAction( "Reset configuration to default",self)
+        tools_reset_configuration=QAction( "Reset configuration to default",owner)
         tools_reset_configuration.triggered.connect(self.onMenuResetConfiguration)
-        tools_draft_commandtool=QAction("Draft CommandLineTool from documentation", self)
+        tools_draft_commandtool=QAction("Draft CommandLineTool from documentation", owner)
         tools_draft_commandtool.triggered.connect(self.onMenuNewDraftCommandTool)
 
-        tools_troubleshoot=QAction(  "Troubleshoot tool/workflow",self)
+        tools_troubleshoot=QAction(  "Troubleshoot tool/workflow",owner)
         tools_troubleshoot.triggered.connect(self.onMenuTroubleshooting)
 
-        new_commandtool=QAction( "Command line tool", self)
+        new_commandtool=QAction( "Command line tool", owner)
         new_commandtool.triggered.connect(self.onMenuNewCommandTool)
-        new_expressiontool=QAction("Expression tool", self)
+        new_expressiontool=QAction("Expression tool", owner)
         new_expressiontool.triggered.connect(self.onMenuNewExpressionTool)
-        new_workflow=QAction("Workflow", self)
+        new_workflow=QAction("Workflow", owner)
         new_workflow.triggered.connect(self.onMenuNewWorkflow)
         # Draft CommandLineTool placeholder action
         
 
-        self.file_menu=self.menu.addMenu( "&File")
-        self.file_menu.addAction( file_open )
-        self.file_menu.addAction( file_save)
-        self.file_menu.addAction( file_saveas )
-        self.file_menu.addAction( file_reload )
+        file_menu=menu_bar.addMenu( "&File")
+        file_menu.addAction( file_open )
+        file_menu.addAction( file_save)
+        file_menu.addAction( file_saveas )
+        file_menu.addAction( file_reload )
 
-        self.new_menu = QMenu("New", self)
-        self.file_menu.addMenu(self.new_menu)
-        self.new_menu.addAction( new_commandtool)
-        self.new_menu.addAction( new_expressiontool)
-        self.new_menu.addAction( new_workflow)
-        self.new_menu.addSeparator()
+        new_menu = QMenu("New", owner)
+        file_menu.addMenu(new_menu)
+        new_menu.addAction( new_commandtool)
+        new_menu.addAction( new_expressiontool)
+        new_menu.addAction( new_workflow)
+        new_menu.addSeparator()
         
         # Add Recent submenu
-        self.recent_menu = QMenu("Recent", self)
-        self.file_menu.addMenu(self.recent_menu)
+        recent_menu = QMenu("Recent", owner)
+        file_menu.addMenu(recent_menu)
+        self._recent_menus.append(recent_menu)
         self.updateRecentMenu()
-        self.file_menu.addSeparator()
-        self.file_menu.addAction( file_add_folder )
-        self.file_menu.addSeparator()
-        self.file_menu.addAction( file_close )
-        self.file_menu.addAction( file_exit )
+        file_menu.addSeparator()
+        file_menu.addAction( file_add_folder )
+        file_menu.addSeparator()
+        file_menu.addAction( file_close )
+        file_menu.addAction( file_exit )
         
 
-        self.tools_menu=self.menu.addMenu( "&Tools")
-        self.tools_menu.addAction( tools_validate)
-        self.tools_menu.addAction( tools_maketemplate)
-        self.tools_menu.addAction( tools_pack_workflow)
-        self.tools_menu.addAction( tools_restructure_workflow)
-        self.tools_menu.addAction( tools_save_documentation)
-        self.tools_menu.addAction( tools_upgrade)
-        self.tools_menu.addSeparator()
-        self.tools_menu.addAction( tools_configuration)
-        self.tools_menu.addAction( tools_reset_configuration)
-        self.tools_menu.addSeparator()
-        self.tools_menu.addAction( tools_draft_commandtool)
-        self.tools_menu.addSeparator()
-        self.tools_menu.addAction( tools_troubleshoot)
+        tools_menu=menu_bar.addMenu( "&Tools")
+        tools_menu.addAction( tools_validate)
+        tools_menu.addAction( tools_maketemplate)
+        tools_menu.addAction( tools_pack_workflow)
+        tools_menu.addAction( tools_restructure_workflow)
+        tools_menu.addAction( tools_save_documentation)
+        tools_menu.addAction( tools_upgrade)
+        tools_menu.addSeparator()
+        tools_menu.addAction( tools_configuration)
+        tools_menu.addAction( tools_reset_configuration)
+        tools_menu.addSeparator()
+        tools_menu.addAction( tools_draft_commandtool)
+        tools_menu.addSeparator()
+        tools_menu.addAction( tools_troubleshoot)
         
-        self.window_menu=self.menu.addMenu("&Window")
-        main_window_action = QAction("Main Window", self)
-        main_window_action.triggered.connect(self._ensureWindowActive)
-        self.window_menu.addAction(main_window_action)
-        self.window_menu.addSeparator()
+        window_menu=menu_bar.addMenu("&Window")
+        self._window_menus.append(window_menu)
+        self.refreshWindowMenus()
         
         # Help menu
-        self.help_menu = self.menu.addMenu("&Help")
-        help_user_guide = QAction("User Guide", self)
+        help_menu = menu_bar.addMenu("&Help")
+        help_user_guide = QAction("User Guide", owner)
         help_user_guide.triggered.connect(self.onMenuHelp)
-        self.help_menu.addAction(help_user_guide)
+        help_menu.addAction(help_user_guide)
+
+        if owner is self:
+            self.file_menu, self.tools_menu, self.new_menu = file_menu, tools_menu, new_menu
+            self.recent_menu, self.window_menu, self.help_menu = recent_menu, window_menu, help_menu
+
+    def refreshWindowMenus(self):
+        """Rebuild the Window menu of every window: the main window and the open documents."""
+        self._window_menus = [menu for menu in self._window_menus if not sip.isdeleted(menu)]
+        for menu in self._window_menus:
+            self._clearMenu(menu)
+            menu.addAction("Main Window", self._ensureWindowActive)
+            if self.detached_windows:
+                menu.addAction("Reattach All Tabs to the Main Window", self.reattachAllWindows)
+                menu.addAction("Tile Windows Side by Side", self.tileWindows)
+            menu.addSeparator()
+            for window_id, title in self.window_titles.items():
+                menu.addAction(title, lambda _checked=False, window_id=window_id: self.onMenuFocus(window_id))
+
+    @staticmethod
+    def _clearMenu(menu:QMenu):
+        for action in menu.actions():
+            menu.removeAction(action)
+            action.deleteLater()
 
     def updateRecentMenu(self):
         """
-        Update the Recent menu with the list of recently opened files.
+        Update the Recent menu of every window with the list of recently opened files.
         Shows up to 10 most recently opened files.
         Shows basename only if unique, or basename with parent directory if duplicates exist.
         """
-        # Clear existing menu items
-        self.recent_menu.clear()
-        
         # Get recent files from configuration
         recent_files = data.configuration.get('recents', [])
-        
-        if not recent_files:
-            # Show "No recent files" if the list is empty
-            no_recent_action = QAction("No recent files", self)
-            no_recent_action.setEnabled(False)
-            self.recent_menu.addAction(no_recent_action)
-        else:
-            # Track files that need to be removed due to errors
-            files_to_remove = []
 
-            # Count how many times each basename appears to detect duplicates
-            from collections import Counter
-            valid_files = []
-            for file_path in reversed(recent_files):
-                try:
-                    if Path(file_path).exists():
-                        valid_files.append(file_path)
-                    else:
-                        files_to_remove.append(file_path)
-                except (OSError, ValueError) as e:
-                    self.logger.warning(f"Error accessing recent file {file_path}: {e}. Removing from recent files list.")
+        # Track files that need to be removed due to errors
+        files_to_remove = []
+        valid_files = []
+        for file_path in reversed(recent_files):
+            try:
+                if Path(file_path).exists():
+                    valid_files.append(file_path)
+                else:
                     files_to_remove.append(file_path)
+            except (OSError, ValueError) as e:
+                self.logger.warning(f"Error accessing recent file {file_path}: {e}. Removing from recent files list.")
+                files_to_remove.append(file_path)
 
-            basename_counts = Counter(Path(f).name for f in valid_files)
+        # Count how many times each basename appears to detect duplicates
+        from collections import Counter
+        basename_counts = Counter(Path(f).name for f in valid_files)
 
+        self._recent_menus = [menu for menu in self._recent_menus if not sip.isdeleted(menu)]
+        for menu in self._recent_menus:
+            self._clearMenu(menu)
+            if not valid_files:
+                # Show "No recent files" if the list is empty
+                no_recent_action = menu.addAction("No recent files")
+                no_recent_action.setEnabled(False)
+                continue
             # Add recent files (already in most-recent-first order)
             for file_path in valid_files:
                 file_name = Path(file_path).name
@@ -780,34 +830,35 @@ class MainWindow( QMainWindow):
                     display_name = f"{file_name}  —  {Path(file_path).parent.name}"
                 else:
                     display_name = file_name
-                action = QAction(display_name, self)
+                action = menu.addAction(display_name,
+                                        lambda _checked=False, f=file_path: self.onOpenRecentFile(f, host=self.activeHost()))
                 action.setToolTip(file_path)  # Show full path as tooltip
-                action.triggered.connect(lambda checked, f=file_path: self.onOpenRecentFile(f))
-                self.recent_menu.addAction(action)
-            
-            # Remove inaccessible files from the recent files list
-            if files_to_remove:
-                for file_path in files_to_remove:
-                    if file_path in data.configuration['recents']:
-                        data.configuration['recents'].remove(file_path)
-                data.configuration_manager.saveConfiguration()
+
+        # Remove inaccessible files from the recent files list
+        if files_to_remove:
+            for file_path in files_to_remove:
+                if file_path in data.configuration['recents']:
+                    data.configuration['recents'].remove(file_path)
+            data.configuration_manager.saveConfiguration()
 
         self.updateRecentLists()
     
-    def onOpenRecentFile(self, file_path:str):
+    def onOpenRecentFile(self, file_path:str, host:WorkbenchWindow=None):
         """
         Open a file from the recent files list.
         
         Args:
             file_path (str): Full path to the file to open.
+            host: the window to open it in (by default the one the user works in).
         """
+        dialog_parent = host if host is not None else self._dialogParent()
         try:
             if Path(file_path).exists():
                 self.logger.info(f"Opening recent file {file_path}")
-                self.onCreateWindowFromFile(file_path)
+                self.openDocument(file_path, host=host)
             else:
                 self.logger.error(f"Recent file {file_path} no longer exists")
-                QMessageBox.warning(self, "File Not Found", 
+                QMessageBox.warning(dialog_parent, "File Not Found", 
                                   f"The file {file_path} no longer exists.")
                 # Remove the file from recent files list
                 if file_path in data.configuration['recents']:
@@ -816,7 +867,7 @@ class MainWindow( QMainWindow):
                     self.updateRecentMenu()  # Refresh the menu
         except (OSError, ValueError) as e:
             self.logger.error(f"Error accessing recent file {file_path}: {e}")
-            QMessageBox.warning(self, "Error Opening File", 
+            QMessageBox.warning(dialog_parent, "Error Opening File", 
                               f"Cannot access the file {file_path}:\n{str(e)}")
             # Remove the file from recent files list
             if file_path in data.configuration['recents']:
@@ -825,34 +876,48 @@ class MainWindow( QMainWindow):
                 self.updateRecentMenu()  # Refresh the menu
     
     def set_active_child_window(self, old, new):
-        # Set the currently active child window
-        any_window_active = False
-        for window in self.open_windows.values():
-            if window.isAncestorOf(new) or window == new:
-                self.active_window = window
-                any_window_active = True
+        """The focus moved to the widget ``new``: its document becomes the active one."""
+        document = None
+        host = None
+        widget = new
+        while widget is not None:
+            if document is None and isinstance(widget, ChildWindow):
+                document = widget
+            if isinstance(widget, WorkbenchWindow):
+                host = widget
                 break
-                
-        if not any_window_active:
+            widget = widget.parentWidget()
+        if document is not None and document.window_id in self.open_windows:
+            self.active_window = document
+        elif host is not None:
             # Focus is outside the documents (side panel, menus...): the
-            # document shown in the workbox stays the active one.
-            current = self.workbox.currentWidget() if hasattr(self, 'workbox') else None
+            # document shown by the window stays the active one.
+            current = host.tabs.currentWidget()
             self.active_window = current if isinstance(current, ChildWindow) else None
-        
+        elif self.active_window is not None and self.active_window.window_id not in self.open_windows:
+            self.active_window = None
+
         # Only log the window_id if we have an active window
         if self.active_window:
             self.logger.debug(f"Set the active window to {self.active_window.window_id}")
         else:
             self.logger.debug("No active window set")
     
-    def add_window_to_menu(self, cwl_type:str='CommandLineTool'):
+    def add_window_to_menu(self, cwl_type:str='CommandLineTool', host:WorkbenchWindow=None):
+        """
+        Create a document of the given type as a new tab of ``host`` (by
+        default the window the user works in) and list it in the Window menu.
+        Returns the id of the document.
+        """
+        if host is None or sip.isdeleted(host):
+            host = self.activeHost()
 
         # ids must stay unique after documents are closed
         if not hasattr(self, '_window_ids'):
             self._window_ids = itertools.count(1)
         window_id = next(self._window_ids)
-        child_window = ChildWindow(window_id=window_id, cwl_type=cwl_type, parent=self)
-        # Documents live as tabs of the workbox rather than as separate windows
+        child_window = ChildWindow(window_id=window_id, cwl_type=cwl_type, parent=host)
+        # Documents live as tabs of a window rather than as separate windows
         child_window.setWindowFlags(Qt.WindowType.Widget)
         
         # Set the same icon for the child window
@@ -872,13 +937,11 @@ class MainWindow( QMainWindow):
         child_window.menuConfiguration.connect(self.onMenuConfiguration)
         
         # Add window to the window menu
-        new_window=QAction(f"{window_id}: <{cwl_type}>", self)
-        new_window.triggered.connect(lambda: self.onMenuFocus(window_id))
-        self.window_menu.addAction(new_window)
-        self.window_actions[window_id]=new_window
+        self.window_titles[window_id] = f"{window_id}: <{cwl_type}>"
+        self.refreshWindowMenus()
         
         # Show the document as a new tab and bring it to the front
-        self.workbox.addTab(child_window, self._documentIcon(child_window), self._documentTitle(child_window))
+        host.tabs.addTab(child_window, self._documentIcon(child_window), self._documentTitle(child_window))
         child_window.windowTitleChanged.connect(lambda _title, w=child_window: self._refreshDocumentTab(w))
         self._refreshDocumentTab(child_window)
         self._showDocument(child_window)
@@ -887,9 +950,10 @@ class MainWindow( QMainWindow):
         
 
     def update_window_menu_entry(self, window_id, new_name):
-        if window_id in self.window_actions:
+        if window_id in self.window_titles:
             self.logger.debug(f"Window {window_id} is in the list and its name will be updated to {new_name}")
-            self.window_actions[window_id].setText(new_name)
+            self.window_titles[window_id] = new_name
+            self.refreshWindowMenus()
             if window_id in self.open_windows:
                 self._refreshDocumentTab(self.open_windows[window_id])
         else:
@@ -897,17 +961,16 @@ class MainWindow( QMainWindow):
 
     def remove_window_from_menu(self, window_id):
         # Remove the window entry from the Window menu
-        if window_id in self.window_actions:
+        if window_id in self.window_titles:
             self.logger.debug(f"Removing window {window_id} from the window menu")
-            # Remove the action from the window menu
-            self.window_menu.removeAction(self.window_actions[window_id])
-            # Remove the action from our dictionary
-            self.window_actions.pop(window_id, None)
+            self.window_titles.pop(window_id, None)
+            self.refreshWindowMenus()
         
         # Remove the closed window from the open windows dictionary and its tab
         window = self.open_windows.pop(window_id, None)
-        if window is not None and self.workbox.indexOf(window) >= 0:
-            self.workbox.removeTab(self.workbox.indexOf(window))
+        tabs = DetachableTabWidget.tabsOf(window)
+        if window is not None and tabs is not None and tabs.indexOf(window) >= 0:
+            tabs.removeTab(tabs.indexOf(window))
             window.deleteLater()
         
         # If this was the active window, set active_window to None
@@ -943,7 +1006,7 @@ class MainWindow( QMainWindow):
   
 
         try:
-            dialog = DraftTool(parent=self)
+            dialog = DraftTool(parent=self._dialogParent())
             result = dialog.exec()
             if result == QDialog.DialogCode.Accepted:
                 # dialog.outfilename should contain generated file path (relative to CWD)
@@ -955,7 +1018,7 @@ class MainWindow( QMainWindow):
                         self.open_windows[window_id].menuOpenFile.emit(str(Path(out_file).absolute()))
                 else:
                     from PyQt6.QtWidgets import QMessageBox
-                    QMessageBox.warning(self, "Draft CommandLineTool", "No output file was produced or file missing.")
+                    QMessageBox.warning(self._dialogParent(), "Draft CommandLineTool", "No output file was produced or file missing.")
         # If rejected do nothing
         except Exception as e:
             self.logger.error(f"Error during Draft CommandLineTool creation: {e}")
@@ -975,7 +1038,7 @@ class MainWindow( QMainWindow):
 
         '''
         if not self.active_window:
-            QMessageBox.warning(self, "No Document", "Please select a document first.")
+            self._warnNoDocument()
             return None
         if self.active_window:
             self.active_window.menuValidate.emit()
@@ -987,7 +1050,7 @@ class MainWindow( QMainWindow):
         self.logger.debug("Opening configuration dialog")
         
         from ConfigDialog import ConfigDialog
-        dialog = ConfigDialog(self)
+        dialog = ConfigDialog(self._dialogParent())
         
         # Show the dialog and process the result
         if (dialog.exec() == QDialog.DialogCode.Accepted):
@@ -1013,7 +1076,7 @@ class MainWindow( QMainWindow):
         
         # Ask for confirmation
         reply = QMessageBox.question(
-            self,
+            self._dialogParent(),
             "Reset Configuration",
             "Are you sure you want to reset the configuration to default values?\n\n"
             "This will overwrite your current settings.",
@@ -1031,7 +1094,7 @@ class MainWindow( QMainWindow):
                 
                 self.logger.info("Configuration reset to defaults")
                 QMessageBox.information(
-                    self,
+                    self._dialogParent(),
                     "Configuration Reset",
                     "Configuration has been reset to default values."
                 )
@@ -1044,16 +1107,16 @@ class MainWindow( QMainWindow):
             except Exception as e:
                 self.logger.error(f"Failed to reset configuration: {e}")
                 QMessageBox.critical(
-                    self,
+                    self._dialogParent(),
                     "Reset Failed",
                     f"Failed to reset configuration:\n{str(e)}"
                 )
 
     def onMenuOpenFile(self):
 
-        home_dir = workspaceFolders.currentFolder() or str(Path.home())
+        home_dir = self.activeHost().workspace.currentFolder() or str(Path.home())
         fname=QFileDialog.getOpenFileName(
-            self, 
+            self._dialogParent(), 
             'Open file', 
             home_dir, 
             "*.txt;*.cwl;*.yaml;*.json")
@@ -1081,7 +1144,7 @@ class MainWindow( QMainWindow):
         # if self.file_path:
         # self.saveFile(self.file_path, format)
         if not self.active_window:
-            QMessageBox.warning(self, "No Document", "Please select a document first.")
+            self._warnNoDocument()
             return None
         if self.active_window.file_path :
             self.active_window.menuSaveFile.emit( 
@@ -1096,13 +1159,13 @@ class MainWindow( QMainWindow):
         # options = QFileDialog.Options()
         # options |= QFileDialog.Option.DontUseNativeDialog  # Optional: Use PyQt's dialog instead of the native OS one
         if not self.active_window:
-            QMessageBox.warning(self, "No Document", "Please select a document first.")
+            self._warnNoDocument()
             return None
         else:
             aw=self.active_window
         # Use the current workspace folder by default, or fall back to existing file location or home directory
-        if workspaceFolders.currentFolder():
-            home_dir = workspaceFolders.currentFolder()
+        if self.activeHost().workspace.currentFolder():
+            home_dir = self.activeHost().workspace.currentFolder()
         elif self.active_window.file_path:
             home_dir = str(Path(self.active_window.file_path).parent)
         else:
@@ -1111,7 +1174,7 @@ class MainWindow( QMainWindow):
         filters = "YAML (*.cwl);;YAML (*.yaml);;JSON (*.cwl);;JSON (*.json)"
         # Show the dialog and get the selected file path
         file_path, format = QFileDialog.getSaveFileName(
-            self, 
+            self._dialogParent(), 
             "Save As", 
             home_dir,  # Default directory or file name
             filters
@@ -1138,42 +1201,42 @@ class MainWindow( QMainWindow):
         
     def onMenuReloadFile(self):
         if not self.active_window:
-            QMessageBox.warning(self, "No Document", "Please select a document first.")
+            self._warnNoDocument()
             return None
         if self.active_window:
             self.active_window.menuReloadFile.emit()
     
     def onMenuUpgradeVersion(self):
         if not self.active_window:
-            QMessageBox.warning(self, "No Document", "Please select a document first.")
+            self._warnNoDocument()
             return None
         if self.active_window:
             self.active_window.menuUpgradeVersion.emit(None)
         
     def onMenuPackWorkflow(self):
         if not self.active_window:
-            QMessageBox.warning(self, "No Document", "Please select a document first.")
+            self._warnNoDocument()
             return None
         if self.active_window:
             self.active_window.menuPackWorkflow.emit(None)
 
     def onMenuRestructureWorkflow(self):
         if not self.active_window:
-            QMessageBox.warning(self, "No Document", "Please select a document first.")
+            self._warnNoDocument()
             return None
         if self.active_window:
             self.active_window.menuRestructureWorkflow.emit(None)
 
     def onMenuSaveDocumentation(self):
         if not self.active_window:
-            QMessageBox.warning(self, "No Document", "Please select a document first.")
+            self._warnNoDocument()
             return None
         if self.active_window:
             self.active_window.menuSaveDocumentation.emit()
 
     def onMenuMakeTemplate(self):
         if not self.active_window:
-            QMessageBox.warning(self, "No Document", "Please select a document first.")
+            self._warnNoDocument()
             return None
         if self.active_window:
             # print(f"Emitting signal for menu make template")
@@ -1182,7 +1245,7 @@ class MainWindow( QMainWindow):
     def onMenuTroubleshooting(self):
         """Handle the Troubleshoot tool/workflow menu action."""
         if not self.active_window:
-            QMessageBox.warning(self, "No Document", "Please select a document first.")
+            self._warnNoDocument()
             return None
         if self.active_window:
             self.active_window.menuTroubleshoot.emit()
@@ -1210,7 +1273,7 @@ class MainWindow( QMainWindow):
             if not user_guide_path.exists():
                 self.logger.error(f"User guide not found at {user_guide_path}")
                 QMessageBox.warning(
-                    self,
+                    self._dialogParent(),
                     "User Guide Not Found",
                     f"The user guide could not be found at:\n{user_guide_path}"
                 )
@@ -1364,85 +1427,3 @@ class MainWindow( QMainWindow):
                 "Error Opening User Guide",
                 f"An error occurred while opening the user guide:\n{str(e)}"
             )
-
-
-    def onOpenWorkspace(self):
-        """
-        Show the workspace browser in the side panel and rescan the workspace.
-        """
-        self.logger.debug("Opening workspace browser")
-        self.sidebar.show()
-        self.sidebar_tabs.setCurrentIndex(self.sidebar_pages.indexOf(self.workspace_panel))
-        self.workspace_panel.on_rescan_clicked()
-        self.workspace_panel.search_box.setFocus()
-
-    def onAddWorkspaceFolder(self):
-        """
-        Choose a folder and add it to the workspace (Composer "Add a Folder").
-        """
-        self.logger.debug("Adding a folder to the workspace")
-        start_directory = workspaceFolders.currentFolder() or str(Path.home())
-        folder = QFileDialog.getExistingDirectory(
-            self,
-            "Add a Folder to the Workspace",
-            start_directory,
-            QFileDialog.Option.ShowDirsOnly
-        )
-        if folder:
-            self.addWorkspaceFolder(folder)
-
-    def addWorkspaceFolder(self, folder) -> bool:
-        """
-        Add a folder to the workspace and show it in the Workspace panel. A
-        folder already in the workspace is refused; workspace folders inside
-        the new folder are replaced by it.
-
-        Returns:
-            True if the folder was added.
-        """
-        status, related = workspaceFolders.addFolder(folder)
-        if status == workspaceFolders.DUPLICATE:
-            QMessageBox.information(self, "Add a Folder", f"{folder} is already in the workspace.")
-            return False
-        if status == workspaceFolders.NESTED:
-            QMessageBox.information(self, "Add a Folder",
-                                    f"{folder} is already in the workspace, inside {related[0]}.")
-            return False
-        self.updateWorkspaceViews()
-        self.sidebar.show()
-        self.sidebar_tabs.setCurrentIndex(self.sidebar_pages.indexOf(self.workspace_panel))
-        self.workspace_panel.showFolder(workspaceFolders.currentFolder())
-        message = f"Added {workspaceFolders.currentFolder()} to the workspace"
-        if related:
-            message += f", in place of {', '.join(related)}"
-        self.statusBar().showMessage(message, 5000)
-        return True
-
-    def onRemoveWorkspaceFolder(self, folder: str):
-        """
-        Remove a folder from the workspace (Composer "Remove from Workspace").
-        The files are not touched; documents opened from the folder stay open.
-        """
-        folder = workspaceFolders.normalise(folder)
-        open_documents = [window for window in self.open_windows.values()
-                          if getattr(window, 'file_path', None)
-                          and workspaceFolders.containingFolder(window.file_path) == folder]
-        if open_documents:
-            reply = QMessageBox.question(
-                self,
-                "Remove from Workspace",
-                f"{len(open_documents)} open document(s) are in {folder}. Files outside the "
-                "workspace cannot be saved.\n\nRemove the folder from the workspace anyway?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-        if workspaceFolders.removeFolder(folder):
-            self.updateWorkspaceViews()
-            self.statusBar().showMessage(f"Removed {folder} from the workspace", 5000)
-
-    def onCurrentWorkspaceFolderChanged(self, folder: str):
-        """The user works in another workspace folder: new files go there."""
-        if workspaceFolders.setCurrentFolder(folder):
-            self._updateWorkspaceStatus()

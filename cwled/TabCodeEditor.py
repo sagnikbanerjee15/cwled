@@ -122,7 +122,8 @@ class CodeWindow( QWidget):
         self.fileuri_text.setTextFormat(Qt.TextFormat.RichText)
         self.fileuri_text.setStyleSheet(f"QLabel {{ background-color: {theme.INPUT_BG}; padding: 3px; border: 1px solid {theme.INPUT_BORDER}; border-radius: 2px; }}")
         # Set size policy to expand horizontally
-        self.fileuri_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # (Ignored: a long URI must not set the minimum width of the window; the label stretches anyway)
+        self.fileuri_text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.fileuri_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         
         layoutToggle=QHBoxLayout()

@@ -515,6 +515,8 @@ class InfoWindow(QWidget):
         ribbon_layout.addWidget(self.file_created_label)
         ribbon_layout.addWidget(self.file_modified_label)
         ribbon_layout.addStretch(1)
+        # the dates must not set the minimum width of the window: a narrow window clips the ribbon
+        self.file_info_ribbon.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
 
         # Composer status-bar look for the file information ribbon
         self.file_info_ribbon.setObjectName('fileInfoRibbon')
