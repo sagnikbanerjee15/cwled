@@ -5,15 +5,17 @@ import json
 import sys
 import builtins
 import data
+import theme
 import logging
 from helperFunctions import addArrayItem
 from nested_lookup import nested_lookup, nested_update
 from widgets.qLabelLineEditWidget import QLabelLineEditWidget
 from widgets.qBaseCommand import QBaseCommandGroupWidget
-from widgets.qArguments import    QArgumentsGroupWidget
-from widgets.qInputs import QInputsGroupWidget
+from widgets.qArguments import    QArgumentsGroupWidget, QArgumentWidget
+from widgets.qInputs import QInputsGroupWidget, QInputWidget
 from widgets.qOutputs import QOutputsGroupWidget
-from widgets.qButtons import QLineSeparator, QCodeButton
+from widgets.qButtons import QCodeButton
+from widgets.qInspector import Inspector
 from widgets.qRequirements import QResourceRequirementsWidget, QRequirementsWidget
 from widgets.qInitialWorkDir import QInitialWorkDirGroup
 from widgets.qDocker import QDockerWidget
@@ -23,7 +25,7 @@ from qErrorMessage import QErrorMessage
 from typing import Union, Any, Optional
 
 from cwl_utils.parser import save
-from JavascriptEditor import JavaScriptEditorDialog
+from JavascriptEditor import JavaScriptEditorDialog, validateExpression
 # Don't import specific DockerRequirement, we'll import dynamically
 
 class ToolEditor( QWidget ):
@@ -115,9 +117,12 @@ class ToolEditor( QWidget ):
         self.expression_code.clicked.connect(self.onExpressionCodeClicked)
         
         # Create layout for expression widget with JavaScript editor button
+        # (the panel title names the field)
+        self.expression.label.hide()
+        self.expression.attachButton(self.expression_code)
         self.expression_layout = QHBoxLayout()
+        self.expression_layout.setContentsMargins(0, 0, 0, 0)
         self.expression_layout.addWidget(self.expression)
-        self.expression_layout.addWidget(self.expression_code)
         self.expression_widget = QWidget()
         self.expression_widget.setLayout(self.expression_layout)
 
@@ -159,14 +164,14 @@ class ToolEditor( QWidget ):
         self.stdout = QLabelLineEditWidget(
             label_text="Output stream",
             placeholder_text="Filename for standard output",
-            objectName='stdout', parent=self)
+            objectName='stdout', parent=self, stacked=True)
         self.stdout.editingFinished.connect(self.onStdoutChange)
         
         
         self.stderr = QLabelLineEditWidget(
             label_text="Error stream",
             placeholder_text="Filename for standard error",
-            objectName='stderr', parent=self)
+            objectName='stderr', parent=self, stacked=True)
         self.stderr.editingFinished.connect(self.onStderrChange)
         
 
@@ -180,30 +185,76 @@ class ToolEditor( QWidget ):
 
         
 
-        # Add the input boxes to the layout
-        layout.addWidget(self.docker_image)
-        layout.addWidget(QLineSeparator(parent=self))
-        layout.addWidget(self.basecommand)
-        layout.addWidget(self.expression_widget)
-        layout.addWidget(QLineSeparator(parent=self))
-        layout.addWidget(self.argument)
-        layout.addWidget(QLineSeparator(parent=self))
-        layout.addWidget(self.input)
-        layout.addWidget(QLineSeparator(parent=self))
-        layout.addWidget(self.output)
-        layout_stdout = QHBoxLayout()
+        # Add the sections to the layout as Composer form panels, in the
+        # order of Composer's tool visual editor
+        layout.setContentsMargins(13, 13, 13, 13)
+        layout.setSpacing(theme.SECTION_SPACING)
 
-        layout_stdout.addWidget(self.stdout)
-        layout_stdout.addWidget(self.stderr)
-        layout.addLayout(layout_stdout)
-        layout.addWidget(QLineSeparator(parent=self))
-        layout.addWidget(self.resourcerequirements)
-        layout.addWidget(QLineSeparator(parent=self))
-        layout.addWidget(self.requirements)
-        layout.addWidget(QLineSeparator(parent=self))
-        layout.addWidget(self.initial_workingdir)
-        layout.addWidget(QLineSeparator(parent=self))
-        layout.addWidget(self.envvar)
+        # Composer "Other" section: stream redirects and exit codes
+        self.stdin = QLineEdit(self)
+        self.stdin.editingFinished.connect(self.onStdinChange)
+        self.success_codes = QLineEdit(self)
+        self.success_codes.editingFinished.connect(lambda: self.onCodesChange('successCodes'))
+        self.temporary_fail_codes = QLineEdit(self)
+        self.temporary_fail_codes.editingFinished.connect(lambda: self.onCodesChange('temporaryFailCodes'))
+        self.permanent_fail_codes = QLineEdit(self)
+        self.permanent_fail_codes.editingFinished.connect(lambda: self.onCodesChange('permanentFailCodes'))
+        for edit in (self.stdout.line_edit, self.stderr.line_edit):
+            edit.setPlaceholderText("")
+
+        self.streams_widget = QWidget(parent=self)
+        other_layout = QGridLayout(self.streams_widget)
+        other_layout.setContentsMargins(0, 0, 0, 0)
+        other_layout.setHorizontalSpacing(26)
+        other_layout.setVerticalSpacing(13)
+        other_layout.setColumnStretch(0, 1)
+        other_layout.setColumnStretch(1, 1)
+        other_layout.addWidget(theme.FieldGroup(
+            "Stdin redirect", self.stdin, parent=self,
+            open_editor=lambda: self.editExpression(self.stdin),
+            validator=self._validateExpression), 0, 0)
+        other_layout.addWidget(theme.FieldGroup(
+            "Stdout redirect", self.stdout.line_edit, parent=self,
+            open_editor=lambda: self.editExpression(self.stdout.line_edit),
+            validator=self._validateExpression), 0, 1)
+        other_layout.addWidget(theme.FieldGroup(
+            "Stderr redirect", self.stderr.line_edit, parent=self,
+            open_editor=lambda: self.editExpression(self.stderr.line_edit),
+            validator=self._validateExpression), 1, 0)
+        separator = QFrame(self.streams_widget)
+        separator.setObjectName('panelSeparator')
+        separator.setFixedHeight(1)
+        other_layout.addWidget(separator, 2, 0, 1, 2)
+        other_layout.addWidget(theme.FieldGroup("Success Codes", self.success_codes, parent=self), 3, 0)
+        other_layout.addWidget(theme.FieldGroup("Temporary Fail Codes", self.temporary_fail_codes, parent=self), 3, 1)
+        other_layout.addWidget(theme.FieldGroup("Permanent Fail Codes", self.permanent_fail_codes, parent=self), 4, 0)
+        # The labelled stdout/stderr widgets only keep their (moved) fields
+        self._hidden_fields = QWidget(self)
+        self._hidden_fields.hide()
+        self.stdout.setParent(self._hidden_fields)
+        self.stderr.setParent(self._hidden_fields)
+
+        sections = [
+            (self.docker_image, dict(title="Docker Image")),
+            (self.basecommand, dict(title="Base Command", add_text="Add Base Command",
+                                    stripe=theme.CODE_BASE_CMD)),
+            (self.expression_widget, dict(title="Expression")),
+            (self.argument, dict(title="Arguments", add_text="Add an Argument",
+                                 stripe=theme.CODE_ARGS,
+                                 columns=[("Value", 4), ("Prefix", 3), ("Separate", 3), ("#", 2)])),
+            (self.input, dict(title="Input Ports", add_text="Add an Input",
+                              stripe=theme.CODE_INPUTS,
+                              columns=[("ID", 4), ("Type", 3), ("Binding", 4), ("", 1)])),
+            (self.output, dict(title="Output Ports", add_text="Add an Output",
+                               columns=[("ID", 4), ("Type", 3), ("Glob", 4), ("", 1)])),
+            (self.resourcerequirements, dict(title="Computational Resources")),
+            (self.requirements, dict(title="Requirements")),
+            (self.initial_workingdir, dict(title="File Requirements", add_text="Add a File")),
+            (self.envvar, dict(title="Environment Variables", add_text="Add an Environment Variable")),
+            (self.streams_widget, dict(title="Other")),
+        ]
+        for section, options in sections:
+            layout.addWidget(theme.FormSection(section, parent=self, **options))
         layout.addStretch(1)
         
         container_widget = QWidget(parent=self)
@@ -223,11 +274,23 @@ class ToolEditor( QWidget ):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding)
 
+        # Composer object inspector, docked on the right of the sections
+        self.inspector = Inspector(root=container_widget, parent=self)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self.splitter.setObjectName('inspectorSplitter')
+        self.splitter.setHandleWidth(6)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.addWidget(self.scroll_area)
+        self.splitter.addWidget(self.inspector)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 0)
+        self.splitter.setSizes([10000, Inspector.DEFAULT_WIDTH])
+
         # Main layout of the window
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        main_layout.addWidget(self.scroll_area)
+        main_layout.addWidget(self.splitter)
 
         # Set the layout for the widget
         self.setLayout(main_layout)
@@ -267,14 +330,11 @@ class ToolEditor( QWidget ):
             int: The index of the requirement in the requirements list, or None if
                  not found and create=False
         '''
-        # Make sure requirements list exists
+        # Only look: the requirements list is created when one is added, so
+        # that opening a tool does not change it
         self.logger.debug(f"Finding requirements index for { type(self.cwl_tool) }")
-        if not hasattr(self.cwl_tool, 'requirements') or self.cwl_tool.requirements is None:
-            self.logger.debug("Creating empty requirements list")
-            self.cwl_tool.requirements = []
-            
         req_index = None
-        for i, req in enumerate(self.cwl_tool.requirements):
+        for i, req in enumerate(getattr(self.cwl_tool, 'requirements', None) or []):
             self.logger.debug(f"Checking requirement {i}: {req}")
             self.logger.debug(f"\t{type(req)}")
             if req.class_ == query_requirement:
@@ -298,12 +358,56 @@ class ToolEditor( QWidget ):
                 new_req = {'class_': query_requirement}
                 
             # Add it to the requirements list
+            if getattr(self.cwl_tool, 'requirements', None) is None:
+                self.cwl_tool.requirements = []
             self.cwl_tool.requirements.append(new_req)
             # Return the index of the newly added requirement
             req_index = len(self.cwl_tool.requirements) - 1
             self.logger.debug(f"Created new requirement of type {query_requirement} at index {req_index}")
             
         return req_index
+
+    def _validateExpression(self, code, report):
+        """Evaluate a redirect expression as the Expression Editor would."""
+        validateExpression(self, None, code, report)
+
+    def inspectCommandLinePart(self, loc: str) -> bool:
+        """
+        Show where a part of the command line preview comes from: the input or
+        argument opens in the side panel, other parts scroll to their section.
+        ``loc`` is the part's location, e.g. "inputs.src", "arguments[1]".
+        """
+        row = None
+        if loc.startswith('inputs.'):
+            input_id = loc.split('.')[1]
+            rows = [r for r in self.findChildren(QInputWidget)
+                    if r.line_edit_ID.text() == input_id and r.parent() is not None
+                    and not isinstance(r.parent().parent(), QInputWidget)]
+            row = rows[-1] if rows else None
+        elif loc.startswith('arguments['):
+            try:
+                target = save(self.cwl_tool.arguments[int(loc[len('arguments['):-1])])
+            except (ValueError, IndexError, TypeError):
+                target = None
+            rows = [r for r in self.findChildren(QArgumentWidget)
+                    if target is not None and r.getCWL() is not None and save(r.getCWL()) == target]
+            row = rows[-1] if rows else None
+        if row is not None and hasattr(row, 'row_bar'):
+            row.row_bar.clicked.emit()
+            self.scroll_area.ensureWidgetVisible(row, 0, 40)
+            return True
+        section = {'baseCommand': self.basecommand, 'stdin': self.streams_widget,
+                   'stdout': self.streams_widget}.get(loc.split('[')[0])
+        if section is not None:
+            self.scroll_area.ensureWidgetVisible(section, 0, 40)
+            return True
+        return False
+
+    def _addRequirement(self, requirement):
+        """Append a requirement, creating the list if the tool has none yet."""
+        if getattr(self.cwl_tool, 'requirements', None) is None:
+            self.cwl_tool.requirements = []
+        self.cwl_tool.requirements.append(requirement)
     
     def populateFromCWL(self):
         '''
@@ -335,6 +439,7 @@ class ToolEditor( QWidget ):
                 self.basecommand.setCWLVersion( self.cwl_version)
                 self.stderr.setVisible(True)
                 self.stdout.setVisible(True)
+                self.streams_widget.setVisible(True)
                 self.argument.setVisible(True)
                 self.basecommand.populateFromCWL( self.cwl_tool.baseCommand or [])
             # take care of the expression for ExpressionTool
@@ -346,6 +451,7 @@ class ToolEditor( QWidget ):
                 self.basecommand.setVisible(False)
                 self.stderr.setVisible(False)
                 self.stdout.setVisible(False)
+                self.streams_widget.setVisible(False)
                 self.argument.setVisible(False)
                 
                 # self.expression.setCWLVersion( self.cwl_version)
@@ -365,12 +471,18 @@ class ToolEditor( QWidget ):
                     self.docker_image.setCWLVersion( self.cwl_version)
                     self.docker_image.populateFromCWL(docker_req)
 
-            # add the stdout
-            if hasattr(self, 'stdout') and hasattr(self.cwl_tool, 'stdout') and self.cwl_tool.stdout  :
-                self.stdout.setText( self.cwl_tool.stdout )
-            # add the stderr
-            if hasattr( self, 'stderr') and hasattr(self.cwl_tool, 'stderr') and self.cwl_tool.stderr:
-                self.stderr.setText( self.cwl_tool.stderr )
+            # add the stream redirects and exit codes (Other section)
+            if hasattr(self, 'stdout') and hasattr(self.cwl_tool, 'stdout'):
+                self.stdout.setText( self.cwl_tool.stdout or '' )
+            if hasattr( self, 'stderr') and hasattr(self.cwl_tool, 'stderr'):
+                self.stderr.setText( self.cwl_tool.stderr or '' )
+            if hasattr(self, 'stdin') and hasattr(self.cwl_tool, 'stdin'):
+                self.stdin.setText( self.cwl_tool.stdin or '' )
+            for field, edit in (('successCodes', 'success_codes'),
+                                ('temporaryFailCodes', 'temporary_fail_codes'),
+                                ('permanentFailCodes', 'permanent_fail_codes')):
+                if hasattr(self, edit) and hasattr(self.cwl_tool, field):
+                    getattr(self, edit).setText(','.join(map(str, getattr(self.cwl_tool, field) or [])))
             
             # add the requirements
             if hasattr(self, 'resourcerequirements'):
@@ -427,6 +539,11 @@ class ToolEditor( QWidget ):
             if hasattr(self, 'scroll_area'):
                 self.scroll_area.verticalScrollBar().setValue(v_scroll_value)
 
+            # The rows were rebuilt: keep the inspected entry marked, or close
+            # the inspector if the entry is gone
+            if hasattr(self, 'inspector'):
+                QTimer.singleShot(0, self.inspector.entriesRefreshed)
+
      
     def onExpressionCodeClicked(self,widget_to_update=None):
         '''
@@ -465,7 +582,7 @@ class ToolEditor( QWidget ):
         # Find the Docker requirement index
         docker_req_index = self._findRequirementIndex('DockerRequirement')
         # If empty, we might want to remove the requirement
-        if not docker_req.dockerPull and docker_req_index:
+        if not docker_req.dockerPull and docker_req_index is not None:
             # Remove the Docker requirement if it exists and the image is empty
             self.cwl_tool.requirements.pop(docker_req_index)
             self.codeUpdated.emit("CWL app updated")
@@ -477,7 +594,7 @@ class ToolEditor( QWidget ):
                 self.cwl_tool.requirements[docker_req_index] = docker_req
             # If it doesn't exist, create a new one
             else:
-                self.cwl_tool.requirements.append(docker_req)
+                self._addRequirement(docker_req)
             
             # Emit the signal that the CWL code has been updated
             self.codeUpdated.emit("CWL app updated")
@@ -517,12 +634,44 @@ class ToolEditor( QWidget ):
         self.codeUpdated.emit("CWL app updated")
 
 
+    def editExpression(self, line_edit):
+        """Edit a field's value in the expression editor."""
+        dialog = JavaScriptEditorDialog(parent=self)
+        dialog.editor.setText(line_edit.text())
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            line_edit.setText(dialog.get_javascript_code())
+            line_edit.editingFinished.emit()
+
+    def onStdinChange(self):
+        """Update the stdin redirect of the tool."""
+        if hasattr(self.cwl_tool, 'stdin'):
+            self.cwl_tool.stdin = self.stdin.text() or None
+            self.codeUpdated.emit("CWL app updated")
+
+    def onCodesChange(self, field: str):
+        """Update successCodes / temporaryFailCodes / permanentFailCodes (comma separated)."""
+        if not hasattr(self.cwl_tool, field):
+            return
+        edit = {'successCodes': self.success_codes,
+                'temporaryFailCodes': self.temporary_fail_codes,
+                'permanentFailCodes': self.permanent_fail_codes}[field]
+        codes = []
+        for part in edit.text().split(','):
+            part = part.strip()
+            if part:
+                try:
+                    codes.append(int(part))
+                except ValueError:
+                    pass
+        setattr(self.cwl_tool, field, codes or None)
+        self.codeUpdated.emit("CWL app updated")
+
     def onStdoutChange(self):
         '''
         update the filename that holds the stdout
         ''' 
         try:
-            self.cwl_tool.stdout=self.stdout.text()
+            self.cwl_tool.stdout=self.stdout.text() or None
             self.codeUpdated.emit("CWL app updated")
         except Exception as e:
             # Use QErrorMessage to show error and optionally raise the exception
@@ -540,7 +689,7 @@ class ToolEditor( QWidget ):
         update the filename that holds the stderr
         ''' 
         try:
-            self.cwl_tool.stderr=self.stderr.text()
+            self.cwl_tool.stderr=self.stderr.text() or None
             self.codeUpdated.emit("CWL app updated")
         except Exception as e:
             # Use QErrorMessage to show error and optionally raise the exception
@@ -572,7 +721,7 @@ class ToolEditor( QWidget ):
         resreq_req_index = self._findRequirementIndex('ResourceRequirement')
         
         # If empty, we might want to remove the requirement
-        if not resource_req and resreq_req_index:
+        if not resource_req and resreq_req_index is not None:
             # Remove the Resource requirement if it exists and the image is empty
             self.cwl_tool.requirements.pop(resreq_req_index)
             self.codeUpdated.emit("CWL app updated")
@@ -581,10 +730,10 @@ class ToolEditor( QWidget ):
 
         # Update the requirement in the requirements list
         try:
-            if resreq_req_index :
+            if resreq_req_index is not None:
                 self.cwl_tool.requirements[resreq_req_index] = resource_req
             else:
-                self.cwl_tool.requirements.append(resource_req)
+                self._addRequirement(resource_req)
             self.codeUpdated.emit("CWL app updated")
         except Exception as e:
             # Use QErrorMessage to show error and optionally raise the exception
@@ -621,7 +770,7 @@ class ToolEditor( QWidget ):
                 if idx is not None:
                     self.cwl_tool.requirements[idx]=x
                 else:
-                    self.cwl_tool.requirements.append(x)
+                    self._addRequirement(x)
             
             self.codeUpdated.emit("CWL app updated")
         except Exception as e:
@@ -655,7 +804,7 @@ class ToolEditor( QWidget ):
         if class_req_index is not None:
             self.cwl_tool.requirements[class_req_index] = requirement
         else:
-            self.cwl_tool.requirements.append(requirement)
+            self._addRequirement(requirement)
         
         self.codeUpdated.emit("CWL app updated")
 
@@ -678,7 +827,7 @@ class ToolEditor( QWidget ):
         if class_req_index is not None:
             self.cwl_tool.requirements[class_req_index] = requirement
         else:
-            self.cwl_tool.requirements.append(requirement)
+            self._addRequirement(requirement)
         self.logger_envvar.debug(f"Updated the EnvVarRequirement")
         self.codeUpdated.emit("CWL app updated")
 
@@ -726,7 +875,12 @@ class ToolEditor( QWidget ):
 
         base_commands=[ x['command'] for x in new_cwl]
         self.logger_basecommand.debug(f"\tThe new baseCommand is {json.dumps( base_commands)}")
-        # Removed sys.exit(123) as it was causing errors
+        # Leave the document alone when nothing changed ("echo" and ["echo"]
+        # are the same base command), e.g. while the list is being filled
+        current = getattr(self.cwl_tool, 'baseCommand', None)
+        current = [current] if isinstance(current, str) else list(current or [])
+        if current == base_commands:
+            return
         try:
             self.cwl_tool.baseCommand = base_commands
             self.codeUpdated.emit("CWL app updated")

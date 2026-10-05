@@ -4,6 +4,8 @@ from PyQt6.QtWidgets import (
     QDialog, QLabel
 )
 import data
+import theme
+from .qInspector import Inspector
 from .qButtons import QEditButton, QRemoveButton
 from DialogArgument import ArgumentDialog
 from typing import Union, Any, List, Dict, Optional
@@ -142,6 +144,17 @@ class QArgumentsGroupWidget(QCWLedWidget):
             parent=self,
             argument_parameter=ap
         )
+
+        # Composer adds the entry right away and opens it in the inspector
+        inspector = Inspector.forWidget(self)
+        if inspector is not None:
+            argument_obj = dialog.getData()
+            dialog.deleteLater()
+            widget = self.addArgumentWidget(argument_obj)
+            self.container_layout.update()
+            self._emit_editing_finished()
+            inspector.openEntry(argument_obj, QArgumentWidget)
+            return widget
         
         dialog.show_next_to_main_window()
         
@@ -309,10 +322,6 @@ class QArgumentWidget(QCWLedWidget):
     def initUI(self):
         """Initialize the user interface."""
         super().initUI()
-        
-        # Create a layout and add widgets to it
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
 
         # Initialize widgets
         self.line_edit_ID = QLineEdit(self)
@@ -361,18 +370,21 @@ class QArgumentWidget(QCWLedWidget):
         self.remove_button.clicked.connect(self.onRemoveClicked)
         self.edit_button.clicked.connect(self.onEditClicked)
 
-        # Add widgets to layout
-        layout.addWidget(self.line_edit_ID)
-        layout.addWidget(self.line_edit_type)
-        layout.addWidget(self.line_edit_prefix)
-        layout.addWidget(self.line_edit_argument)
-        layout.addWidget(self.line_edit_order)
-        layout.addStretch(1)
-        layout.addWidget(self.remove_button)
-        layout.addWidget(self.edit_button)
-        
-        # Set the layout for the widget
-        self.setLayout(layout)
+        # Composer argument list entry: Value | Prefix | Separate | #
+        # The whole bar opens the ArgumentDialog; ID and type are not shown.
+        self.separate_label = QLabel(self)
+        self.separate_label.setFont(theme.iconFont())
+        self.row_bar = theme.ListRow(self)
+        self.row_bar.addColumn(self.line_edit_argument, 4)
+        self.row_bar.addColumn(self.line_edit_prefix, 3)
+        self.row_bar.addColumn(self.separate_label, 3)
+        self.row_bar.addColumn(self.line_edit_order, 2)
+        self.row_bar.clicked.connect(self.onEditClicked)
+        self._hidden_fields = QWidget(self)
+        self._hidden_fields.hide()
+        for hidden in (self.line_edit_ID, self.line_edit_type, self.edit_button):
+            hidden.setParent(self._hidden_fields)
+        theme.listRowLayout(self, self.row_bar, self.remove_button)
         
         # Update fields display
         # self.populateFields()
@@ -393,6 +405,13 @@ class QArgumentWidget(QCWLedWidget):
         If we already have data, populate the dialog fields.
         """
         dialog = ArgumentDialog(parent=self, argument_parameter=self.getCWL())
+
+        # In the tool editor the argument opens in the Composer object inspector
+        inspector = Inspector.forWidget(self)
+        if inspector is not None:
+            inspector.inspect(self, dialog, lambda d: d.argument_edit.text() or d.prefix_edit.text() or "Argument")
+            return
+
         # Position the dialog next to the main window
         dialog.show_next_to_main_window()
 
@@ -419,10 +438,14 @@ class QArgumentWidget(QCWLedWidget):
             if hasattr(arg, 'position') and arg.position is not None:
                 position_text = str(arg.position)
             self.line_edit_order.setText(position_text)
+            # CWL separates prefix and value unless separate is false
+            separate = getattr(arg, 'separate', None) is not False
+            self.separate_label.setText(theme.FA['check'] if separate else '')
         else:
             self.line_edit_prefix.setText('')
             self.line_edit_argument.setText('')
             self.line_edit_order.setText('0')
+            self.separate_label.setText('')
 
 
     def clear(self):

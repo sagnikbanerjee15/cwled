@@ -6,6 +6,7 @@ from PyQt6.Qsci import QsciScintilla, QsciLexerJavaScript,QsciLexerYAML
 import json
 import builtins
 import data
+import theme
 import logging
 from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import LiteralScalarString
@@ -67,11 +68,9 @@ class CodeWindow( QWidget):
         self.editor=QsciScintilla()
         self.editor.setWindowTitle(self.title)
         # Customize the editor appearance
-        self.editor.setMarginsFont(QFont("Courier", 12))
+        self.editor.setMarginsFont(theme.monospaceFont(12))
         self.editor.setMarginWidth(0, 50)  # Line numbers margin width
         self.editor.setMarginLineNumbers(0, True)
-        self.editor.setMarginsBackgroundColor(QColor("#333"))
-        self.editor.setMarginsForegroundColor(QColor("#CCC"))
         # Highlighting style (21 is an arbitrary style number for highlight)
         self.highlight_style = 21
         self.editor.SendScintilla(self.editor.SCI_STYLESETBACK, self.highlight_style, 0xFFFF00)  # Yellow background
@@ -81,15 +80,14 @@ class CodeWindow( QWidget):
         # Set up the editor
         self.editor.setUtf8(True)
         self.editor.setCaretLineVisible(True)
-        self.editor.setCaretLineBackgroundColor(QColor("#1fff0000"))
         self.editor.setBraceMatching(QsciScintilla.BraceMatch.SloppyBraceMatch)
             
         # Enable folding
         self.editor.setFolding(QsciScintilla.FoldStyle.BoxedTreeFoldStyle)
-        self.editor.setFoldMarginColors(QColor("#444444"), QColor("#333333"))
         self.editor.setMarginWidth(2, 15)  # Margin 2 is used for folding markers
         self.editor.setMarginType(2, QsciScintilla.MarginType.SymbolMargin)
         self.editor.setMarginSensitivity(2, True)  # Make the margin sensitive to clicks
+        theme.styleCodeEditor(self.editor)
         
 
         # add Find/Replace buttons
@@ -122,7 +120,7 @@ class CodeWindow( QWidget):
         self.fileuri_text.setMinimumWidth(200)
         self.fileuri_text.setWordWrap(False)
         self.fileuri_text.setTextFormat(Qt.TextFormat.RichText)
-        self.fileuri_text.setStyleSheet("QLabel { background-color: #f0f0f0; padding: 3px; border: 1px solid #ccc; border-radius: 3px; }")
+        self.fileuri_text.setStyleSheet(f"QLabel {{ background-color: {theme.INPUT_BG}; padding: 3px; border: 1px solid {theme.INPUT_BORDER}; border-radius: 2px; }}")
         # Set size policy to expand horizontally
         self.fileuri_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.fileuri_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -537,6 +535,7 @@ class CodeWindow( QWidget):
                     lexer.setFont(editor_font, style)
                 # lexer.setDefaultFont(QFont("Courier", 16))
                 self.editor.setLexer(lexer)
+                theme.styleCodeEditor(self.editor, lexer)
             if self.format == 'JSON':
                 lexer = QsciLexerJavaScript()
                 # lexer.setDefaultFont(QFont("Courier", 16))
@@ -544,6 +543,7 @@ class CodeWindow( QWidget):
                 for style in range(0, 32):  # Set font for all possible style numbers
                     lexer.setFont(editor_font, style)
                 self.editor.setLexer(lexer)
+                theme.styleCodeEditor(self.editor, lexer)
                 text= json.dumps(cwl_text, indent=3)
             self.logger.debug(f"Sending {text} to the editor")
             # Save scroll and cursor position before replacing text
@@ -678,7 +678,7 @@ class CodeWindow( QWidget):
         # Check if URI has a scheme
         if '://' in uri:
             scheme, path = uri.split('://', 1)
-            scheme_part = f'<span style="color: #FF8C00;">{scheme}://</span>'  # Orange
+            scheme_part = f'<span style="color: {theme.ORANGE};">{scheme}://</span>'  # Orange
         else:
             scheme_part = ''
             path = uri
@@ -693,12 +693,12 @@ class CodeWindow( QWidget):
                 # Add trailing slash for clarity
                 if not directory.endswith(os.sep):
                     directory += os.sep
-                dir_part = f'<span style="color: #0066CC;">{directory}</span>'  # Blue
+                dir_part = f'<span style="color: {theme.SKY};">{directory}</span>'  # Blue
             else:
                 dir_part = ''
             
             if filename:
-                file_part = f'<span style="color: #CC0000;">{filename}</span>'  # Red
+                file_part = f'<span style="color: {theme.RED};">{filename}</span>'  # Red
             else:
                 file_part = ''
             

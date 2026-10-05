@@ -6,6 +6,7 @@ from PyQt6.QtGui import QIcon
 from CWLparser import Parser
 import builtins
 import data
+import theme
 import logging
 import getpass
 from sanitizeName import sanitize
@@ -22,6 +23,7 @@ import tempfile
 from urllib.parse import urlparse
 import re,json,sys,os
 from datetime import datetime
+logger = logging.getLogger(__name__)
 
 
 
@@ -87,7 +89,7 @@ class InfoWindow(QWidget):
 
             input: either a CommandLineTool or an ExpressionTool
             '''
-            print(f"Received  {input.class_}")
+            logger.debug(f"Received  {input.class_}")
             if input.class_ == 'CommandLineTool':
                 cwl_ver = input.cwlVersion
                 output = Parser('ExpressionTool',
@@ -117,7 +119,7 @@ class InfoWindow(QWidget):
                 output.label = input.label
             if hasattr(input, 'doc'):
                 output.doc = input.doc
-            print(f"Returning {output.class_}")
+            logger.debug(f"Returning {output.class_}")
             return output
 
         if (old_class in ['CommandLineTool', 'ExpressionTool'] and
@@ -127,7 +129,7 @@ class InfoWindow(QWidget):
             info_CWL = self.cwl_tool
             self.cwl_tool = CLT_Expression(info_CWL)
             msg = f"Updated the class of the document to {self.cwl_tool.class_}"
-            print(msg)
+            logger.debug(msg)
         self.codeUpdated.emit(self.emit_message)
 
     def onCWLVersionChanged(self):
@@ -410,8 +412,7 @@ class InfoWindow(QWidget):
 
         # Add AI button with sparkler icon
         self.ai_button = QPushButton(self)
-        icon_path = data.configuration.get('icons').get('ai') 
-        self.ai_button.setIcon(QIcon(icon_path))
+        self.ai_button.setIcon(theme.icon('ai', color=theme.SKY))
         self.ai_button.setToolTip("AI")
         self.ai_button.setFixedSize(30, 30)  # Make button square and compact
         self.ai_button.clicked.connect(self.onAIButtonPressed)
@@ -515,8 +516,13 @@ class InfoWindow(QWidget):
         ribbon_layout.addWidget(self.file_modified_label)
         ribbon_layout.addStretch(1)
 
+        # Composer status-bar look for the file information ribbon
+        self.file_info_ribbon.setObjectName('fileInfoRibbon')
+        self.file_info_ribbon.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.file_info_ribbon.setStyleSheet(
-            "QWidget { border-top: 1px solid #cccccc; }"
+            f"QWidget#fileInfoRibbon {{ background-color: {theme.STATUS_BAR_BG}; "
+            f"border-top: 1px solid {theme.BLACK}; }} "
+            f"QWidget#fileInfoRibbon QLabel {{ color: {theme.TEXT_MUTED}; padding: 3px 8px; }}"
         )
 
         # Main layout of the window
@@ -664,19 +670,14 @@ class InfoWindow(QWidget):
             cwl_class = self.cwl_tool.class_
             if cwl_class == 'CommandLineTool':
                 self.objectType.setCurrentText('Command line tool')
-                self.success_codes_edit.setVisible(True)
-                self.temporary_fail_codes_edit.setVisible(True)
-                self.permanent_fail_codes_edit.setVisible(True)
             elif cwl_class == 'ExpressionTool':
                 self.objectType.setCurrentText('Expression tool')
-                self.success_codes_edit.setVisible(True)
-                self.temporary_fail_codes_edit.setVisible(True)
-                self.permanent_fail_codes_edit.setVisible(True)
             elif cwl_class == 'Workflow':
                 self.objectType.setCurrentText('Workflow')
-                self.success_codes_edit.setVisible(False)
-                self.temporary_fail_codes_edit.setVisible(False)
-                self.permanent_fail_codes_edit.setVisible(False)
+            # Exit codes are edited in the Visual Editor's "Other" section (as in Composer)
+            self.success_codes_edit.setVisible(False)
+            self.temporary_fail_codes_edit.setVisible(False)
+            self.permanent_fail_codes_edit.setVisible(False)
 
             if hasattr(self.cwl_tool, 'successCodes'):
                 # Convert successCodes to a comma-separated string

@@ -8,6 +8,8 @@ from DialogInput import InputDialog
 import json
 from typing import Dict, List, Any, Optional
 import data
+import theme
+from .qInspector import Inspector
 import inspect
 # Import for CWL operations
 from widgets.QCWLedWidget import QCWLedWidget
@@ -16,9 +18,11 @@ from CWLparser import (
     get_type, is_array, is_optional,
     is_optional_array, get_input_bindings
 )
-from cwl_utils_handler import get_cwl_module
+from cwl_utils_handler import get_cwl_module, format_parameter_type, format_input_binding
 from cwl_utils.parser import save
 import uuid
+import logging
+logger = logging.getLogger(__name__)
 # Helper function to get calling function information
 
 def get_caller_info():
@@ -193,10 +197,10 @@ class QInputsGroupWidget(QCWLedWidget):
             f"onAddInputWidget called from {caller} "
             f"with args: [ ]"
         )
-        print(f"We need to open a new dialog. decide what inpput we have")
-        print(f"self = { type(self)}")
-        print(f"parent= { type(self.parent())}  { isinstance( self.parent(),QInputWidget)}")
-        print(f"grandparent= { type(self.parent().parent())} { isinstance( self.parent().parent(),QInputWidget)} ")
+        logger.debug(f"We need to open a new dialog. decide what inpput we have")
+        logger.debug(f"self = { type(self)}")
+        logger.debug(f"parent= { type(self.parent())}  { isinstance( self.parent(),QInputWidget)}")
+        logger.debug(f"grandparent= { type(self.parent().parent())} { isinstance( self.parent().parent(),QInputWidget)} ")
         # Create dialog with parent=self
         # to get the data that will populate the widget.
         # first we need to check what type of data we will get back from the dialog
@@ -219,6 +223,17 @@ class QInputsGroupWidget(QCWLedWidget):
             # input_parameter_type=input_parameter_type,
             # cwl_version=self.cwl_version
         )
+
+        # Composer adds the entry right away and opens it in the inspector
+        inspector = Inspector.forWidget(self)
+        if inspector is not None:
+            input_obj = dialog.getData()
+            dialog.deleteLater()
+            widget = self.addInputWidget(input_obj)
+            self.container_layout.update()
+            self._emit_editing_finished()
+            inspector.openEntry(input_obj, QInputWidget)
+            return widget
         
         dialog.show_next_to_main_window()
         
@@ -411,9 +426,6 @@ class QInputWidget(QCWLedWidget):
         self.logger.debug(f"initUI called from {caller} with args: []")
         
         super().initUI()
-        # Create layout
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
 
         # Initialize widgets
         self.line_edit_ID = QLineEdit(self)
@@ -466,24 +478,23 @@ class QInputWidget(QCWLedWidget):
         self.remove_button.clicked.connect(self.onRemoveClicked)
         self.edit_button.clicked.connect(self.onEditClicked)
 
-        # Add widgets to layout
-        layout.addWidget(self.line_edit_ID)
-        layout.addWidget(self.line_edit_type)
-        layout.addWidget(self.line_edit_array)
-        # Add record type widget to layout
-        layout.addWidget(self.line_edit_record_type)
-        if hasattr(self, 'line_edit_prefix'):
-            layout.addWidget(self.line_edit_prefix)
-        if hasattr(self, 'line_edit_argument'):
-            layout.addWidget(self.line_edit_argument)
-        if hasattr(self, 'line_edit_order'):
-            layout.addWidget(self.line_edit_order)
-        
-        layout.addStretch(1)
-        layout.addWidget(self.remove_button)
-        layout.addWidget(self.edit_button)
-        
-        self.setLayout(layout)
+        # Composer input list entry: ID | Type | Binding. The whole bar opens
+        # the InputDialog; the detailed fields stay hidden but are kept up to date.
+        self.type_label = QLabel(self)
+        self.binding_label = QLabel(self)
+        self.row_bar = theme.ListRow(self)
+        self.row_bar.addColumn(self.line_edit_ID, 4)
+        self.row_bar.addColumn(self.type_label, 3)
+        self.row_bar.addColumn(self.binding_label, 4)
+        self.row_bar.addSpacer(1)
+        self.row_bar.clicked.connect(self.onEditClicked)
+        self._hidden_fields = QWidget(self)
+        self._hidden_fields.hide()
+        for hidden in (self.line_edit_type, self.line_edit_array, self.line_edit_record_type,
+                       self.line_edit_prefix, self.line_edit_argument, self.line_edit_order,
+                       self.edit_button):
+            hidden.setParent(self._hidden_fields)
+        theme.listRowLayout(self, self.row_bar, self.remove_button)
         # Update fields display
         # self.populateFields()
 
@@ -536,6 +547,12 @@ class QInputWidget(QCWLedWidget):
             input_parameter=self.getCWL(),
             input_parameter_type=input_parameter_type
         )
+
+        # In the tool editor the input opens in the Composer object inspector
+        inspector = Inspector.forWidget(self)
+        if inspector is not None:
+            inspector.inspect(self, dialog, lambda d: d.id_input.text())
+            return
         
         # Position the dialog next to the main window
         dialog.show_next_to_main_window()
@@ -585,10 +602,12 @@ class QInputWidget(QCWLedWidget):
             
             opt = is_optional(cwl_input)
             
-            # Set font style based on opt value
-            font_style = "font-weight: bold;"
-            font_color = "color: gray;" if opt else "color: black;"
+            # Optional inputs are shown in the muted colour
+            font_style = ""
+            font_color = f"color: {theme.TEXT_MUTED};" if opt else f"color: {theme.TEXT};"
             style_sheet = f"{font_style} {font_color}"
+            self.type_label.setText(format_parameter_type(getattr(cwl_input, 'type_', None)))
+            self.binding_label.setText(format_input_binding(getattr(cwl_input, 'inputBinding', None)))
             
             if is_optional_array(cwl_input):
                 self.line_edit_array.setCheckState(Qt.CheckState.PartiallyChecked)
@@ -666,7 +685,7 @@ class QInputWidget(QCWLedWidget):
                 
             # Add embedded QInputsGroupWidget for record type
             if 'record' in field_type:
-                print("We are handling a record")
+                logger.debug("We are handling a record")
                 # Store the original horizontal layout
                 original_layout = self.layout()
                 
@@ -678,6 +697,7 @@ class QInputWidget(QCWLedWidget):
                 hbox_container = QWidget()
                 hbox_layout = QHBoxLayout(hbox_container)
                 hbox_layout.setContentsMargins(0, 0, 0, 0)
+                hbox_layout.setSpacing(original_layout.spacing())
                 
                 # Move all widgets from original_layout to hbox_layout
                 while original_layout.count():
@@ -699,12 +719,12 @@ class QInputWidget(QCWLedWidget):
                 # Create a container with border for the record fields
                 container = QWidget()
                 container.setObjectName("recordFieldsContainer")
-                container.setStyleSheet("""
-                    QWidget#recordFieldsContainer {
-                        border: 2px solid #aaa;
-                        border-radius: 5px;
+                container.setStyleSheet(f"""
+                    QWidget#recordFieldsContainer {{
+                        border: 1px solid {theme.BLACK};
+                        border-radius: 2px;
                         margin-top: 5px;
-                    }
+                    }}
                 """)
                 
                 # Create a layout for the container
@@ -726,7 +746,7 @@ class QInputWidget(QCWLedWidget):
                     f"Adding {self.default_value.type_}"
                 )
                 # now we need to populate the widgets of the record fields widget
-                print(f"{save( self.default_value)}")
+                logger.debug(f"{save( self.default_value)}")
                 input_type = getattr(self.default_value, 'type_', None)
                 record_schemas = []
                 if (hasattr(input_type, 'fields') and
@@ -742,7 +762,7 @@ class QInputWidget(QCWLedWidget):
                 # a single record schema.
                 if len(record_schemas) == 1:
                     dependent_schema = record_schemas[0]
-                    print(f"Adding fields {dependent_schema.fields}")
+                    logger.debug(f"Adding fields {dependent_schema.fields}")
                     # Push parent record defaults to each field as _field_default
                     record_defaults = {}
                     if hasattr(self.default_value, 'default') and isinstance(self.default_value.default, dict):
@@ -761,7 +781,7 @@ class QInputWidget(QCWLedWidget):
                 # Mutually exclusive records: only when there are multiple
                 # record schemas in the union.
                 if len(record_schemas) > 1:
-                    print(f"Adding records {record_schemas}")
+                    logger.debug(f"Adding records {record_schemas}")
                     # Push defaults to the matching exclusive child field
                     exclusive_defaults = {}
                     if hasattr(self.default_value, 'default') and isinstance(self.default_value.default, dict):
@@ -800,6 +820,8 @@ class QInputWidget(QCWLedWidget):
             self.line_edit_argument.setText('')
             self.line_edit_order.setText('0')
             self.line_edit_record_type.setText('')
+            self.type_label.setText('')
+            self.binding_label.setText('')
             
             # Reset style when no input data
             self.line_edit_type.setStyleSheet("")
@@ -830,9 +852,7 @@ class QInputWidget(QCWLedWidget):
             for i in range(layout.count()):
                 item = layout.itemAt(i)
                 widget = item.widget() if item else None
-                if (widget and
-                        widget.styleSheet() and
-                        'border: 2px solid' in widget.styleSheet()):
+                if widget and widget.objectName() == "recordFieldsContainer":
                     widget.setParent(None)
                     widget.deleteLater()
                     break
@@ -853,7 +873,7 @@ class QInputWidget(QCWLedWidget):
         
         cwl_input = self.getCWL()
         self.logger.debug(f"Received {cwl_input}")
-        print(f"Received {cwl_input}")
+        logger.debug(f"Received {cwl_input}")
         if not cwl_input:
             return None
         
@@ -861,7 +881,7 @@ class QInputWidget(QCWLedWidget):
         
         if hasattr(self, 'record_fields_widget') and self.record_fields_widget:
             self.logger.debug("We need to get the fields of the record")
-            print("Getting the fields of the record")
+            logger.debug("Getting the fields of the record")
             # get the record fields
             record_fields = self.record_fields_widget.getData()
             if record_fields:  # Only process if there are record fields
@@ -871,13 +891,13 @@ class QInputWidget(QCWLedWidget):
                     if x and x.get('argument')
                 ]
                 self.logger.debug(f"Fields {record_fields}")
-                print(f"Fields { record_fields}")
+                logger.debug(f"Fields { record_fields}")
                 
                 # Store the original record type
                 record_type = 'dependent'
                 if hasattr(self, 'line_edit_record_type'):
                     record_type = self.line_edit_record_type.text()
-                print(f"We store the records as {record_type}")
+                logger.debug(f"We store the records as {record_type}")
                 # Update fields based on record type
                 if record_type == 'dependent':
                     # For dependent records, set the fields directly

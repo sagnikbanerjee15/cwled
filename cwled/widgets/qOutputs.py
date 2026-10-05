@@ -5,10 +5,12 @@ from DialogOutput import OutputDialog
 import json
 from typing import Dict, List, Any, Optional,Tuple
 import data
+import theme
+from .qInspector import Inspector
 from copy import deepcopy
 from dataTypes import output
 from widgets.QCWLedWidget import QCWLedWidget
-from cwl_utils_handler import get_cwl_module, CWLType
+from cwl_utils_handler import get_cwl_module, CWLType, format_parameter_type
 from CWLparser import get_type, is_array, is_optional, is_optional_array
 from cwl_utils.parser import save
 import re
@@ -129,6 +131,17 @@ class QOutputsGroupWidget(QCWLedWidget):
             parent=self,
             output_parameter=op
         )
+
+        # Composer adds the entry right away and opens it in the inspector
+        inspector = Inspector.forWidget(self)
+        if inspector is not None:
+            output_obj = dialog.getData()
+            dialog.deleteLater()
+            widget = self.addOutputWidget(output_obj)
+            self.container_layout.update()
+            self._emit_editing_finished()
+            inspector.openEntry(output_obj, QOutputWidget)
+            return widget
         
         dialog.show_next_to_main_window()
         
@@ -275,9 +288,6 @@ class QOutputWidget(QCWLedWidget):
     def initUI(self):
         """Initialize the user interface."""
         super().initUI()
-        # Create layout
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
 
         # Initialize widgets
         self.line_edit_ID = QLineEdit(self)
@@ -310,16 +320,20 @@ class QOutputWidget(QCWLedWidget):
         self.remove_button.clicked.connect(self.onRemoveClicked)
         self.edit_button.clicked.connect(self.onEditClicked)
 
-        # Add widgets to layout
-        layout.addWidget(self.line_edit_ID)
-        layout.addWidget(self.line_edit_type)
-        layout.addWidget(self.line_edit_array)
-        layout.addWidget(self.line_edit_glob)
-        layout.addStretch(1)
-        layout.addWidget(self.remove_button)
-        layout.addWidget(self.edit_button)
-        
-        self.setLayout(layout)
+        # Composer output list entry: ID | Type | Glob. The whole bar opens
+        # the OutputDialog; the detailed fields stay hidden but are kept up to date.
+        self.type_label = QLabel(self)
+        self.row_bar = theme.ListRow(self)
+        self.row_bar.addColumn(self.line_edit_ID, 4)
+        self.row_bar.addColumn(self.type_label, 3)
+        self.row_bar.addColumn(self.line_edit_glob, 4)
+        self.row_bar.addSpacer(1)
+        self.row_bar.clicked.connect(self.onEditClicked)
+        self._hidden_fields = QWidget(self)
+        self._hidden_fields.hide()
+        for hidden in (self.line_edit_type, self.line_edit_array, self.edit_button):
+            hidden.setParent(self._hidden_fields)
+        theme.listRowLayout(self, self.row_bar, self.remove_button)
         # Update fields display
         # self.populateFields()
 
@@ -337,6 +351,11 @@ class QOutputWidget(QCWLedWidget):
         """Handle the edit button click."""
         dialog = OutputDialog(parent=self, output_parameter=self.getCWL())
 
+        # In the tool editor the output opens in the Composer object inspector
+        inspector = Inspector.forWidget(self)
+        if inspector is not None:
+            inspector.inspect(self, dialog, lambda d: d.id_input.text())
+            return
 
         # Show dialog
         dialog.show_next_to_main_window()
@@ -371,9 +390,10 @@ class QOutputWidget(QCWLedWidget):
             
             opt=is_optional(output)
             self.logger.debug(f"Is optional: {opt}")
-            # Set font style based on opt value
-            font_style = "font-weight: bold;"
-            font_color = "color: gray;" if opt else "color: black;"
+            self.type_label.setText(format_parameter_type(getattr(output, 'type_', None)))
+            # Optional outputs are shown in the muted colour
+            font_style = ""
+            font_color = f"color: {theme.TEXT_MUTED};" if opt else f"color: {theme.TEXT};"
             style_sheet = f"{font_style} {font_color}"
             
             if is_optional_array( output ):
