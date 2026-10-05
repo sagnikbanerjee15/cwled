@@ -197,7 +197,8 @@ GroupWidget.editingFinished → ToolEditor.onEditingFinished → codeUpdated sig
 **Child Components**:
 - `CWLGraph` (NetworkGraph.py): The graph visualization widget
 - `StepNode`, `InputNode`, `OutputNode` (GraphNodes.py): Node types
-- Ribbon toolbar with buttons (Add Step, Export Image, Reset View)
+- `CWLNodeItem`, `CWLPortItem`, `GraphControls` (GraphItems.py): Rabix Composer (cwl-svg) drawing of nodes, ports and edges, selection fading, and the canvas buttons (delete, zoom, fit, auto-arrange, export image)
+- Toolbar with Add Step and Duplicate Step buttons and a drop zone for CWL files
 
 **Key Methods**:
 - `setCWLWorkflow(cwl_workflow)`: Stores reference to Workflow object
@@ -267,27 +268,26 @@ emits codeUpdated → Other tabs refresh on next focus
 
 **Location**: `TabCommandLine.py`
 
-**Purpose**: Preview of generated command line
+**Purpose**: Preview of the command line, built from a sample job like Rabix Composer's
 
 **Key Responsibilities**:
-- Display how command will be constructed
-- Show base command, arguments, and inputs in execution order
-- Indicate optional vs required parameters
-- Handle boolean flags, default values, itemSeparator, valueFrom expressions
+- Give every input a sample value (`JavascriptEditor.mockValue`, cached per input and type) or its test value (`testJob.py`)
+- Build the parts in execution order (cwl-ts CommandLinePrepare / CommandLineParsers rules; record fields and enum type bindings as cwltool)
+- Evaluate all expressions of the preview in one background `JSEvaluation` (QJSEngine, 3 s timeout) and render the parts coloured by kind
+- On hover, outline a part and show where it comes from; on click, `TabToolEditor.inspectCommandLinePart(loc)` opens it in the inspector
 
-**No Signal Emission**: Read-only preview
+**No Signal Emission**: Read-only preview; refreshes on `testJobs().changed`
 
 **Key Methods**:
-- `setCWLTool(cwl_tool)`: Stores reference to CommandLineTool
-- `getCMD()`: Generates command line preview from CWL
-- `replace_js_expressions(text)`: Simplifies JavaScript expressions for display
+- `setCWLTool(cwl_tool)` / `populateFromCWL()`: Rebuild the preview
+- `_sampleJob(tool)`: Sample and test values of the inputs
+- `_commandLineParts(tool, job)`: Parts (literal text and expression results)
 
-**Display Features**:
-- Positions arguments and inputs by `position` attribute
-- Shows boolean inputs without `valueFrom` as flags only
-- Displays default values as `<input=default>`
-- Shows array itemSeparator pattern as `<item,item...>`
-- Renders required parameters in bold, optional in lighter color
+### testJob
+
+**Location**: `testJob.py`
+
+**Purpose**: Test values of tool inputs (Composer "Test Value"), kept per document file in CWLed's user data folder (not in the CWL), used by the command line preview, the Expression Editor and inline expression validation.
 
 ## Widget Hierarchy
 
@@ -724,11 +724,50 @@ If track_version=True: Git commit and tag
 
 **Return**: CommandOutputParameter or WorkflowOutputParameter object
 
+### StepInspector
+
+**Location**: `StepInspector.py`
+
+**Purpose**: Configure a workflow step in a side panel next to the canvas (Composer
+`ct-workflow-step-inspector`). `WorkflowEditor` puts it in a splitter with the `CWLGraph`
+and sets `CWLGraph.inspect_step`, so double-clicking a step opens it there.
+
+**Tabs**:
+- App Info: class, CWL version, `sbg:` revision/toolkit/author, source (run file or Embedded), description
+- Inputs: `Files` / `App parameters` / `Conditional inputs` groups; per input the port
+  options (Show/Hide for optional File/Directory, Default/Exposed/Port for the others, applied
+  by `CWLGraph.setPortOption`), a typed default value editor (`ValueEntry`), Link Merge Method,
+  Pick Value (v1.2, several sources) and the connections
+- Step: ID (validated, renamed through `CWLGraph.nodeEdited`), Label, Scatter Method,
+  Scatter, When (v1.2), Description, Set Hints (`HintsDialog`)
+
+**Port visibility** (`CWLGraph.refreshPortVisibility`): a step input port is drawn when its
+input is a required File/Directory, when it is connected, or when it was shown from the
+inspector (`CWLGraph.shown_ports`). Workflow inputs with `sbg:exposed: true` are not drawn.
+
+**Signal Flow**:
+```
+User double-clicks a step node
+    ↓
+CWLGraph.onNodeDoubleClicked → StepInspector.inspect(node)
+    ↓
+User edits a field (text edits are applied after a short delay)
+    ↓
+The inspector updates node.cwl_step in place (or CWLGraph.setPortOption / nodeEdited)
+    ↓
+CWLGraph emits editingFinished → WorkflowEditor.onGraphChanged
+    ↓
+[Normal update cycle continues]
+```
+
+When the editor redraws the graph (`populateFromCWL`) the inspector finds the new node of
+the step by name (`graphRebuilt`); it closes when the step is deleted.
+
 ### StepDialog
 
 **Location**: `DialogStep.py`
 
-**Purpose**: Configure workflow step
+**Purpose**: Configure workflow step (used when a `CWLGraph` has no step inspector)
 
 **Fields**:
 - ID, Label
@@ -751,7 +790,7 @@ If track_version=True: Git commit and tag
 
 **Signal Flow**:
 ```
-User opens StepDialog (double-click node in graph)
+StepNode.onNodeDoubleClicked opens StepDialog
     ↓
 Dialog populates from WorkflowStep object
     ↓
@@ -797,7 +836,7 @@ Graph emits editingFinished
 **StepNode**: Represents workflow step
 - Orange/tan color
 - Has both input and output ports
-- Double-click opens StepDialog for step configuration
+- Double-click opens the step in the StepInspector (StepDialog when there is none)
 - Displays step ID and tool name
 
 **Port System**:
