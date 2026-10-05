@@ -20,20 +20,14 @@ inputs:
   inputBinding:
     position: 10
     prefix: -S
-    separate: true
-    itemSeparator: other
-    shellQuote: true
 - id: input_integer
-  type: 
+  type:
     - 'null'
     - float
   default: 10
   inputBinding:
     position: 15
     prefix: -i
-    separate: true
-    itemSeparator: other
-    shellQuote: true
 - id: dependent_parameters
   default:
     itemA: default_A
@@ -42,29 +36,15 @@ inputs:
     name: dependent_parameters
     fields:
     - name: itemA
-      doc: ''
       type: string
-      label: ''
       inputBinding:
-        position: 0
         prefix: -A
-        separate: true
-        itemSeparator: other
-        shellQuote: true
     - name: itemB
-      doc: ''
       type: string
-      label: ''
       inputBinding:
-        position: 0
         prefix: -B
-        separate: true
-        itemSeparator: other
-        shellQuote: true
     type: "record"
 - id: exclusive_parameters
-  label: ''
-  doc: ''
   default:
     class: itemC
     itemC: default_C
@@ -72,42 +52,23 @@ inputs:
   - name: itemC
     fields:
     - name: itemC
-      doc: ''
       type: string
-      label: ''
       inputBinding:
-        position: 0
         prefix: -C
-        separate: true
-        itemSeparator: other
-        shellQuote: true
     type: record
-    label: ''
-    doc: ''
   - name: itemD
     fields:
     - name: itemD
-      doc: ''
       type: string
-      label: ''
       inputBinding:
-        position: 0
         prefix: -D
-        separate: true
-        itemSeparator: other
-        shellQuote: true
     type: record
-    label: ''
-    doc: ''
 outputs:
 - id: example_out
   type: "stdout"
-requirements: []
-hints: []
 cwlVersion: v1.2
 baseCommand:
 - echo
-arguments: []
 stdout: "output.txt"
 $namespaces:
   "sc": "https://schema.org/"
