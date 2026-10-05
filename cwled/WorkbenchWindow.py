@@ -82,6 +82,7 @@ class WorkbenchWindow(QMainWindow):
         self.tabs.currentChanged.connect(self.onCurrentTabChanged)
         self.tabs.tabTransferred.connect(self.onTabTransferred)
         self.tabs.setWindowFactory(self.controller.createDetachedWindow)
+        self.tabs.menuHook = self.controller.extendTabMenu
         splitter.addWidget(self.tabs)
 
         splitter.setStretchFactor(0, 0)
@@ -342,6 +343,9 @@ class DetachedWindow(WorkbenchWindow):
                 if not document.close():
                     event.ignore()
                     return
+            # what else the window shows (a comparison) goes with it
+            for widget in self.tabs.widgets():
+                self.controller.discardTab(self.tabs, widget)
         self._closing = True
         self.controller.onDetachedWindowClosed(self)
         super().closeEvent(event)

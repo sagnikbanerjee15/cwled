@@ -137,6 +137,7 @@ FA = {
     'times': '\uf00d', 'times-circle': '\uf057', 'trash': '\uf1f8',
     'warning': '\uf071',
     'link': '\uf0c1', 'columns': '\uf0db', 'crosshairs': '\uf05b', 'eye-slash': '\uf070',
+    'th-large': '\uf009', 'exchange': '\uf0ec',
 }
 
 # Glyphs mirrored horizontally, as Composer does for its workflow icon

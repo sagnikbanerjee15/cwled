@@ -884,6 +884,25 @@ class CWLGraph(QWidget):
             self.graph.port_connected.connect(self.onPortConnected)
             self.graph.port_disconnected.connect(self.onPortDisconnected)
         self.refreshPortVisibility()
+        self._applyDiffStates()
+
+    def setDiffStates(self, states: dict):
+        """
+        Mark the steps that differ from another workflow (see TabDiff): ``states`` maps
+        a step id to 'added', 'removed' or 'changed'. An empty one clears the marks.
+        The marks stay when the graph is drawn again.
+        """
+        self._diff_states = dict(states or {})
+        self._applyDiffStates()
+
+    def _applyDiffStates(self):
+        states = getattr(self, '_diff_states', None) or {}
+        for node in self.graph.get_nodes_by_type('cwled.step.StepNode'):
+            try:
+                step_id = shortId(node.cwl_step.id)
+            except Exception:
+                continue
+            node.view.setDiffState(states.get(step_id))
 
     def clear( self):
         """

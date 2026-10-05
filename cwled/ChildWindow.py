@@ -569,6 +569,12 @@ class ChildWindow(QDialog):
             return parsed.path
         return path_text
 
+    def setDiffStates(self, states: dict):
+        """Mark the steps of the workflow that differ from another one in its graph (see TabDiff)."""
+        editor = getattr(self, 'workflow_editor', None)
+        if editor is not None:
+            editor.graph.setDiffStates(states)
+
     def showStepInCode(self, step_id: str) -> bool:
         """Show the Code tab with the definition of a workflow step selected."""
         if not hasattr(self, 'code_editor'):

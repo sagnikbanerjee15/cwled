@@ -40,6 +40,8 @@ import version
 import itertools
 import theme
 import GraphItems
+import DocumentDiff
+from TabDiff import DiffView
 logger = logging.getLogger(__name__)
 
 
@@ -495,11 +497,83 @@ class MainWindow(WorkbenchWindow):
         if widget is self.welcome:
             tabs.removeTab(index)
             return
+        if not isinstance(widget, ChildWindow):
+            self.discardTab(tabs, widget)       # a comparison
             return
         # ChildWindow.closeEvent prompts for unsaved changes and emits
         # windowClosed, which removes the tab (remove_window_from_menu).
         widget.close()
 
+    def discardTab(self, tabs: DetachableTabWidget, widget: QWidget):
+        """Remove a tab that is not a document (a comparison) and delete its page."""
+        if isinstance(widget, ChildWindow) or widget is self.welcome:
+            return
+        index = tabs.indexOf(widget)
+        if index >= 0:
+            tabs.removeTab(index)
+        cleanup = getattr(widget, 'cleanup', None)
+        if cleanup is not None:
+            cleanup()
+        widget.deleteLater()
+
+    # -- comparing documents ------------------------------------------------------------------------------------
+    def extendTabMenu(self, widget: QWidget, menu: QMenu):
+        """The menu of a tab: documents can be compared with another document, file or revision."""
+        if isinstance(widget, ChildWindow):
+            menu.addAction("Compare with\u2026", lambda: self.compareDocument(widget))
+
+    def onMenuCompare(self):
+        if not self.active_window:
+            self._warnNoDocument()
+            return
+        self.compareDocument(self.active_window)
+
+    def compareDocument(self, window: ChildWindow):
+        """
+        Ask what to compare a document with (another open document, its saved version, a
+        revision in git or a file) and show the differences in a tab next to the document.
+        The other one is on the left, the document on the right.
+        """
+        host = DetachableTabWidget.tabsOf(window)
+        host = host.window() if host is not None else self
+        title = self._documentTitle(window).lstrip('*')
+        options = {}
+        for other in self.open_windows.values():
+            if other is not window and isinstance(other, ChildWindow):
+                options[f"Open document: {self._documentTitle(other).lstrip('*')}"] = \
+                    (lambda other=other: DocumentDiff.sourceFromWindow(other))
+        file_path = getattr(window, 'file_path', None)
+        if file_path:
+            options["The saved version of this document"] = \
+                (lambda: DocumentDiff.sourceFromFile(file_path, f"{Path(str(file_path)).name} (saved)"))
+            for revision, description in DocumentDiff.gitRevisions(file_path):
+                options[f"Git: {description}"] = \
+                    (lambda revision=revision, description=description:
+                     DocumentDiff.sourceFromGit(file_path, revision, description.split(' ', 1)[0]))
+        options["A file\u2026"] = None
+        choice, accepted = QInputDialog.getItem(host, "Compare", f"Compare {title} with:", list(options), 0, False)
+        if not accepted:
+            return
+        left = options[choice]
+        if left is None:
+            start = str(Path(str(file_path)).parent) if file_path else (host.workspace.currentFolder() or str(Path.home()))
+            chosen, _filter = QFileDialog.getOpenFileName(host, "Compare with", start, "CWL documents (*.cwl *.yaml *.json)")
+            if not chosen:
+                return
+            left = (lambda: DocumentDiff.sourceFromFile(chosen))
+        self.showComparison(host, left, (lambda: DocumentDiff.sourceFromWindow(window)))
+
+    def showComparison(self, host: WorkbenchWindow, left, right):
+        """Show the comparison of two documents as a tab of ``host``; ``left`` and ``right`` make the two sources."""
+        view = DiffView(left, right)
+        if view.left is None:
+            view.deleteLater()      # the sources could not be read: the view told why
+            QMessageBox.warning(host, "Compare", view.summary.text())
+            return view
+        index = host.tabs.addTab(view, theme.icon('exchange'), view.title())
+        host.tabs.setTabToolTip(index, view.title())
+        host.tabs.setCurrentWidget(view)
+        return view
 
     def onMenuCloseTab(self):
         host = self.activeHost()
@@ -817,6 +891,8 @@ class MainWindow(WorkbenchWindow):
 
         tools_troubleshoot=QAction(  "Troubleshoot tool/workflow",owner)
         tools_troubleshoot.triggered.connect(self.onMenuTroubleshooting)
+        tools_compare=QAction(  "Compare with...",owner)
+        tools_compare.triggered.connect(self.onMenuCompare)
 
         new_commandtool=QAction( "Command line tool", owner)
         new_commandtool.triggered.connect(self.onMenuNewCommandTool)
@@ -854,6 +930,7 @@ class MainWindow(WorkbenchWindow):
 
         tools_menu=menu_bar.addMenu( "&Tools")
         tools_menu.addAction( tools_validate)
+        tools_menu.addAction( tools_compare)
         tools_menu.addAction( tools_maketemplate)
         tools_menu.addAction( tools_pack_workflow)
         tools_menu.addAction( tools_restructure_workflow)

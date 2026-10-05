@@ -42,6 +42,7 @@ FONT_SIZE = 13              # Composer $font-size-base (px)
 PORT_FONT_SIZE = 12         # .9em
 MIN_SCALE, MAX_SCALE = 0.2, 2.0
 LABEL_MAX_WIDTH = 400       # longer node labels are elided
+DIFF_HALO = 6               # distance of the mark of a step that differs (see CWLNodeItem.setDiffState)
 
 # cwl-svg node icons (graph-node.ts): viewBox, placement around the node
 # centre and the SVG shapes.
@@ -77,6 +78,8 @@ _ICONS = {
                '352.32 104.68 387.68 69.32 500.36 182"/>'),
 }
 _renderers = {}
+# the marks of the steps that differ in a comparison: added, removed, changed
+DIFF_COLORS = {'added': theme.GREEN, 'removed': theme.RED, 'changed': theme.CARROT}
 
 
 def _color(key):
@@ -232,6 +235,7 @@ class CWLNodeItem(NodeItem):
         self._glyph = None
         self._hovered = False
         self._label_hovered = False     # the pointer is on the name of a node with a clickable name
+        self._diff = None               # 'added', 'removed' or 'changed' when compared with another workflow
         self.labelClickable = False     # clicking the name does something (it is underlined on hover)
         self.labelToolTip = ''          # what clicking the name does
         self._faded = False
@@ -292,9 +296,16 @@ class CWLNodeItem(NodeItem):
         # zoomed out, the label grows into the ring: the circle is not the name
         return math.hypot(pos.x() - self._radius, pos.y() - self._radius) > self._radius
 
+    def setDiffState(self, state):
+        """Mark the node as added, removed or changed (a workflow is compared with another one), or clear the mark."""
+        if state != self._diff:
+            self.prepareGeometryChange()
+            self._diff = state
+            self.update()
+
     def boundingRect(self):
-        ring = QRectF(0.0, 0.0, self._width, self._height).adjusted(-RING_WIDTH, -RING_WIDTH,
-                                                                    RING_WIDTH, RING_WIDTH)
+        margin = RING_WIDTH + (DIFF_HALO + 2 if self._diff else 0)
+        ring = QRectF(0.0, 0.0, self._width, self._height).adjusted(-margin, -margin, margin, margin)
         if self._label_rect.isNull():
             return ring
         return ring.united(self._label_rect)
@@ -471,6 +482,13 @@ class CWLNodeItem(NodeItem):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        if self._diff:
+            # a halo in the colour of the difference, around the ring
+            halo = QPen(QColor(DIFF_COLORS[self._diff]), 3)
+            halo.setStyle(Qt.PenStyle.DashLine if self._diff == 'removed' else Qt.PenStyle.SolidLine)
+            painter.setPen(halo)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(centre, radius + DIFF_HALO, radius + DIFF_HALO)
         painter.setPen(QPen(ring, RING_WIDTH))
         painter.setBrush(_color('background'))
         painter.drawEllipse(centre, radius, radius)

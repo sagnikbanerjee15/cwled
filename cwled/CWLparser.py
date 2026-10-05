@@ -443,6 +443,32 @@ class Parser(object):
                     ps = PortSplitter(step.scatter, workflow_id=self.cwl_tool.id)
                     step.scatter = ps.port_id
 
+    def _normalizeLoaded(self):
+        """The changes made to a document that was just loaded, so that it is shown the way it is edited."""
+        self._strip_ids()
+        self._strip_workflow_id()
+        self._strip_source()
+        self._strip_scatter()
+        self._strip_outputSource()
+        self._relative_path()
+        self._toMarkdown( )
+
+    def loadString(self, text:str, filename:Union[str,PosixPath,Path]):
+        """
+        Loads a CWL document from its text, as if it was the content of the file
+        ``filename`` (which is used to resolve the paths the document refers to,
+        and need not hold this text): for example an earlier revision of a file.
+        The document is normalized as in ``loadFile``.
+        """
+        self.path = Path(filename)
+        self.cwl_tool = load_document_by_string(
+            text,
+            uri=self.path.absolute().as_uri(),
+            loadingOptions=LoadingOptions(fetcher=getFetcher())
+        )
+        self._normalizeLoaded()
+        self.is_file = True
+
     def loadFile(self, filename:Union[str,PosixPath,Path]):
         """
         Loads a CWL document from a file.
@@ -478,18 +504,7 @@ class Parser(object):
                 self.path,
                 loadingOptions=LoadingOptions(fetcher=getFetcher())
             )
-            # print(f"{json.dumps(save(self.cwl_tool))}")
-            self._strip_ids()
-            # print(f"after stip_ids: {json.dumps(save(self.cwl_tool))[0:40]}")
-            self._strip_workflow_id()
-            # print(f"after stip_workflow_ids: {json.dumps(save(self.cwl_tool))[0:40]}")
-            self._strip_source()
-            self._strip_scatter()
-            # print(f"after stip_source: {json.dumps(save(self.cwl_tool))[0:40]}")
-            self._strip_outputSource()
-            self._relative_path()
-            # print(f"after relative path: {json.dumps(save(self.cwl_tool))[0:40]}")
-            self._toMarkdown( )
+            self._normalizeLoaded()
             self.logger.info(f"✅ Loaded file {self.path}")
         except ValidationException as ve:
             # self.logger.error(f"Could not load file {self.path} due to validation error: {ve}")
