@@ -11,8 +11,12 @@ configuration_manager=None # store the Configuration object to access its method
 # eg cwl_dict.get('tool1')
 cwl_dict={}
 
-# Store the workspace directory that will be used throughout the application
+# Store the workspace directory that will be used throughout the application:
+# the current workspace folder (default location for file dialogs and new files)
 workspace_directory = ""
+
+# All the folders of the workspace (roots of the Workspace panel), see workspaceFolders.py
+workspace_folders = []
 
 # Store data type information
 datatypes={}

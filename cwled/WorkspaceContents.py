@@ -1,14 +1,18 @@
+from PyQt6 import sip
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QTreeView, 
                             QDialogButtonBox, QPushButton, QLabel, QHBoxLayout, QLineEdit,
-                            QApplication, QStyledItemDelegate, QStyle)
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QIcon
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+                            QApplication, QStyledItemDelegate, QStyle, QToolButton,
+                            QStyleOptionViewItem, QHeaderView, QMenu)
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QIcon, QColor
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QModelIndex
 from pathlib import Path
+from collections import Counter
 import logging
 import os, re
 from CWLparser import Parser
 from schema_salad.exceptions import ValidationException
 import data
+import theme
 
 # Custom data roles for lazy loading
 ROLE_PATH = Qt.ItemDataRole.UserRole
@@ -47,28 +51,64 @@ class VersionColumnDelegate(QStyledItemDelegate):
 
         painter.restore()
 
+class SidebarItemDelegate(QStyledItemDelegate):
+    """Composer tree look: folder / file icons for entries without a CWL icon."""
+
+    def __init__(self, tree_view):
+        super().__init__(tree_view)
+        self._tree_view = tree_view
+        self._folder = theme.icon('folder')
+        self._folder_open = theme.icon('folder-open')
+        self._file = theme.icon('file-o', color=theme.SMOKE)
+
+    def initStyleOption(self, option: QStyleOptionViewItem, index):
+        super().initStyleOption(option, index)
+        if index.column() != 0 or not option.icon.isNull() or index.data(ROLE_PATH) is None:
+            # placeholders ("No search results...") have no icon
+            return
+        model = index.model()
+        is_directory = index.data(ROLE_IS_DIRECTORY) or model.hasChildren(index)
+        if is_directory:
+            option.icon = self._folder_open if self._tree_view.isExpanded(index) else self._folder
+        else:
+            option.icon = self._file
+        option.features |= QStyleOptionViewItem.ViewItemFeature.HasDecoration
+
+
 class WorkspaceContents(QMainWindow):
     """
     A class that displays the contents of a workspace in a tree view.
-    Shows all files with .cwl, .json, .yaml extensions in a tree structure.
+    Shows all files with .cwl, .json, .yaml extensions in a tree structure,
+    with one root per workspace folder (Composer "Local Files").
     """
     fileSelected = pyqtSignal(str)  # Signal emitted when a file is selected
+    addFolderRequested = pyqtSignal()  # "Add a Folder" was clicked
+    removeFolderRequested = pyqtSignal(str)  # "Remove from Workspace" on a workspace folder
+    currentFolderChanged = pyqtSignal(str)  # workspace folder of the selected item
     
-    def __init__(self, workspace_path=None, parent=None):
+    def __init__(self, workspace_path=None, parent=None, sidebar=False):
         """
         Initialize the workspace contents view.
         
         Args:
-            workspace_path (str, optional): Path to the workspace directory
+            workspace_path (str | list, optional): Path to the workspace directory,
+                or a list of workspace folders
             parent (QWidget, optional): Parent widget
+            sidebar (bool, optional): Compact layout for the main window side
+                panel (search on top, name column only, icon buttons).
         """
         super().__init__(parent)
+        self.sidebar = sidebar
         
         # Set up logging
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.setLevel(data.configuration.get('logLevel', {}).get(self.__class__.__name__, 'DEBUG'))
         
-        self.workspace_path = workspace_path
+        self.workspace_folders = self._folderList(workspace_path)
+        self._shown_roots = []    # roots of the last full tree (to keep their expansion)
+        self._search_text = ""    # the active search, if any
+        self._showing_search = False      # the tree shows search results
+        self._full_tree_expanded = None   # expanded folders of the full tree during a search
 
         # Unique window identifier
         self.window_id = "WorkspaceContents"
@@ -76,8 +116,42 @@ class WorkspaceContents(QMainWindow):
         self.initUI()
         
         # Populate tree if a workspace path was provided
-        if workspace_path:
-            self.populate_tree(workspace_path)
+        if self.workspace_folders:
+            self.populate_tree()
+        self._updateEmptyState()
+
+    @property
+    def workspace_path(self):
+        """The first workspace folder (the tree used to show a single folder)."""
+        return self.workspace_folders[0] if self.workspace_folders else None
+
+    @workspace_path.setter
+    def workspace_path(self, path):
+        self.workspace_folders = self._folderList(path)
+
+    @staticmethod
+    def _folderList(paths) -> list:
+        """A workspace folder or a list of them, as a list of strings."""
+        if not paths:
+            return []
+        if isinstance(paths, (str, os.PathLike)):
+            paths = [paths]
+        return [str(path) for path in paths]
+
+    def setWorkspaceFolders(self, folders):
+        """Show these workspace folders (each one is a root of the tree)."""
+        folders = self._folderList(folders)
+        if folders == self.workspace_folders:
+            return
+        self.workspace_folders = folders
+        self.refresh()
+
+    def refresh(self):
+        """Rebuild the tree: the search results while searching, else the folders."""
+        if self._search_text:
+            self.filter_tree_by_name(self._search_text)
+        else:
+            self.populate_tree()
     
     def initUI(self):
         """Initialize the UI components"""
@@ -112,6 +186,10 @@ class WorkspaceContents(QMainWindow):
         self.tree_view.header().sectionClicked.connect(self.on_treeview_section_clicked)
         
         main_layout.addWidget(self.tree_view)
+
+        # Shown instead of the tree when the workspace has no folder
+        self.empty_state = self._buildEmptyState()
+        main_layout.addWidget(self.empty_state, 1)
         
         # Add buttons at the bottom
         button_box = QDialogButtonBox()
@@ -120,6 +198,11 @@ class WorkspaceContents(QMainWindow):
         rescan_btn = QPushButton("Rescan")
         rescan_btn.clicked.connect(self.on_rescan_clicked)
         button_box.addButton(rescan_btn, QDialogButtonBox.ButtonRole.ActionRole)
+
+        # Add a folder to the workspace
+        add_folder_btn = QPushButton("Add Folder...")
+        add_folder_btn.clicked.connect(self.addFolderRequested)
+        button_box.addButton(add_folder_btn, QDialogButtonBox.ButtonRole.ActionRole)
         
         # Open button to open selected file
         open_btn = QPushButton("Open Selected File")
@@ -171,19 +254,147 @@ class WorkspaceContents(QMainWindow):
         search_layout.addWidget(self.cancel_search_btn)
         main_layout.addLayout(search_layout)
 
+        if self.sidebar:
+            self._arrangeAsSidebar(main_layout, button_box, sort_layout, search_layout)
+
         # Enable drag from tree view
         self.tree_view.setDragEnabled(True)
         self.tree_view.viewport().setAcceptDrops(False)
         self.tree_view.setSelectionMode(self.tree_view.SelectionMode.SingleSelection)
         # Install event filter for custom drag logic
         self.tree_view.viewport().installEventFilter(self)
+
+        # "Remove from Workspace" on the workspace folders, "Add a Folder" elsewhere
+        self.tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree_view.customContextMenuRequested.connect(self._showContextMenu)
+        # follow the workspace folder the user works in
+        self.tree_view.selectionModel().currentChanged.connect(self._onCurrentChanged)
+
+    def _buildEmptyState(self) -> QWidget:
+        """Message shown when the workspace has no folder."""
+        empty_state = QWidget(self)
+        layout = QVBoxLayout(empty_state)
+        layout.setContentsMargins(16, 24, 16, 16)
+        layout.setSpacing(10)
+        icon_label = QLabel(empty_state)
+        icon_label.setPixmap(theme.icon('folder-open').pixmap(QSize(48, 48), self.devicePixelRatioF()))
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(icon_label)
+        message = QLabel("The workspace is empty.\n"
+                         "Add one or more folders from your computer to the workspace.", empty_state)
+        message.setProperty('muted', True)
+        message.setWordWrap(True)
+        message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(message)
+        add_button = QPushButton("Add a Folder", empty_state)
+        add_button.clicked.connect(self.addFolderRequested)
+        layout.addWidget(add_button, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addStretch(1)
+        empty_state.hide()
+        return empty_state
+
+    def _updateEmptyState(self):
+        empty = not self.workspace_folders
+        self.tree_view.setVisible(not empty)
+        self.empty_state.setVisible(empty)
     
 
 
+    def _arrangeAsSidebar(self, main_layout, button_box, sort_layout, search_layout):
+        """
+        Re-arrange the widgets for the side panel (Composer "My Projects"):
+        a search field with icon buttons above a name-only tree.
+        """
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        self.path_label.hide()
+        button_box.hide()
+        for layout in (sort_layout, search_layout):
+            while layout.count():
+                item = layout.takeAt(0)
+                if item.widget():
+                    item.widget().hide()
+            main_layout.removeItem(layout)
+
+        # Search row
+        search_row = QHBoxLayout()
+        search_row.setContentsMargins(8, 8, 8, 8)
+        search_row.setSpacing(2)
+        self.search_box.setPlaceholderText("Search")
+        self.search_box.addAction(theme.icon('search'), QLineEdit.ActionPosition.LeadingPosition)
+        self.search_box.setClearButtonEnabled(True)
+        self.search_box.show()
+        self.search_box.textChanged.connect(
+            lambda text: self.on_cancel_search_clicked() if not text.strip() else None)
+        search_row.addWidget(self.search_box, 1)
+
+        self.sort_by_name_btn = self._sidebarButton('sort-alpha-asc', "Sort by name (click again to reverse)",
+                                                    self.on_sort_by_name)
+        self.sort_by_time_btn = self._sidebarButton('clock-o', "Sort by date modified (click again to reverse)",
+                                                    self.on_sort_by_time)
+        rescan_btn = self._sidebarButton('refresh', "Rescan the workspace", self.on_rescan_clicked)
+        for button in (self.sort_by_name_btn, self.sort_by_time_btn, rescan_btn):
+            search_row.addWidget(button)
+        main_layout.insertLayout(0, search_row)
+
+        # "+ Add a Folder" link (Composer: "+ Open a Project")
+        add_folder_row = QHBoxLayout()
+        add_folder_row.setContentsMargins(10, 0, 8, 4)
+        self.add_folder_link = QPushButton("Add a Folder", self)
+        self.add_folder_link.setIcon(theme.icon('add'))
+        self.add_folder_link.setIconSize(QSize(12, 12))
+        self.add_folder_link.setToolTip("Add a folder to the workspace")
+        self.add_folder_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        theme.setButtonRole(self.add_folder_link, 'link')
+        self.add_folder_link.clicked.connect(self.addFolderRequested)
+        add_folder_row.addWidget(self.add_folder_link)
+        add_folder_row.addStretch(1)
+        main_layout.insertLayout(1, add_folder_row)
+
+        self.tree_view.setHeaderHidden(True)
+        self.tree_view.setAlternatingRowColors(False)
+        self.tree_view.setIconSize(QSize(16, 16))
+        self.tree_view.setIndentation(14)
+        self.tree_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.tree_view.setItemDelegateForColumn(0, SidebarItemDelegate(self.tree_view))
+        self._applyColumnMode()
+
+    def _sidebarButton(self, glyph, tooltip, handler) -> QToolButton:
+        button = QToolButton(self)
+        button.setIcon(theme.icon(glyph))
+        button.setToolTip(tooltip)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        button.setAutoRaise(True)
+        button.clicked.connect(handler)
+        return button
+
+    def _applyColumnMode(self):
+        """In the side panel only the name column is shown."""
+        if not getattr(self, 'sidebar', False):
+            return
+        for column in (1, 2, 3):
+            self.tree_view.setColumnHidden(column, True)
+        self.tree_view.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+
     def eventFilter(self, source, event):
+        if sip.isdeleted(self):
+            # being destroyed: Qt still delivers its dying children's events here
+            return False
         # Custom drag logic: only allow files to be dragged
-        if source == self.tree_view.viewport() and event.type() == event.Type.MouseMove:
-            index = self.tree_view.indexAt(event.pos())
+        if source == self.tree_view.viewport():
+            # The viewport tracks the mouse (hover highlighting), so MouseMove
+            # also arrives without a button pressed: only start a drag once the
+            # left button is held and the mouse moved past the drag distance.
+            if event.type() == event.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                self._drag_start_pos = event.position().toPoint()
+            elif event.type() == event.Type.MouseButtonRelease:
+                self._drag_start_pos = None
+        start_pos = getattr(self, '_drag_start_pos', None)
+        if source == self.tree_view.viewport() and event.type() == event.Type.MouseMove \
+                and event.buttons() & Qt.MouseButton.LeftButton and start_pos is not None \
+                and (event.position().toPoint() - start_pos).manhattanLength() >= QApplication.startDragDistance():
+            self._drag_start_pos = None
+            index = self.tree_view.indexAt(start_pos)
             item = self.model.itemFromIndex(index)
             if item:
                 path = item.data(ROLE_PATH)
@@ -202,38 +413,140 @@ class WorkspaceContents(QMainWindow):
 
 
 
-    def populate_tree(self, path):
+    def _showContextMenu(self, position):
+        menu = self._contextMenu(self.tree_view.indexAt(position))
+        if menu is not None:
+            menu.exec(self.tree_view.viewport().mapToGlobal(position))
+            menu.deleteLater()
+
+    def _contextMenu(self, index):
         """
-        Populate the tree with the root directory and its immediate children.
-        Uses lazy loading - subdirectories are loaded when expanded.
-        
-        Args:
-            path (str): Path to the workspace directory
+        Context menu of a tree entry (Composer): "Remove from Workspace" on a
+        workspace folder, "Add a Folder..." on the empty area.
         """
-        self.logger.debug(f"Populating tree with files from {path}")
-        self.workspace_path = path
-        self.path_label.setText(f"Workspace: {path}")
-        self.model.clear()
-        self.model.setHorizontalHeaderLabels(['Name', 'Version', 'Format', 'Date Modified'])
-        root_path = Path(path)
-        
-        # Create root item
-        root_item = QStandardItem(root_path.name)
-        root_version_item = QStandardItem("")
-        root_format_item = QStandardItem("")
+        folder = None
+        if index.isValid():
+            folder = self._folderOfRoot(index) if not index.parent().isValid() else None
+            if folder is None:
+                return None
+        menu = QMenu(self)
+        if folder is None:
+            add_action = menu.addAction("Add a Folder...")
+            add_action.triggered.connect(self.addFolderRequested)
+        else:
+            remove_action = menu.addAction("Remove from Workspace")
+            remove_action.setToolTip(folder)
+            remove_action.triggered.connect(lambda _checked=False, f=folder: self.removeFolderRequested.emit(f))
+        return menu
+
+    def _folderOfRoot(self, index):
+        """The workspace folder whose root contains ``index`` (None for placeholders)."""
+        if not index.isValid():
+            return None
+        while index.parent().isValid():
+            index = index.parent()
+        folder = index.siblingAtColumn(0).data(ROLE_PATH)
+        return folder if folder in self.workspace_folders else None
+
+    def _onCurrentChanged(self, current, _previous):
+        folder = self._folderOfRoot(current)
+        if folder is not None:
+            self.currentFolderChanged.emit(folder)
+
+    def showFolder(self, folder):
+        """Select the root of a workspace folder and scroll to it."""
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            if index.data(ROLE_PATH) == str(folder):
+                self.tree_view.setCurrentIndex(index)
+                self.tree_view.scrollTo(index, QTreeView.ScrollHint.PositionAtTop)
+                return
+
+    def _rootLabels(self) -> dict:
+        """Root names: the folder name, with its parent when two folders share a name."""
+        names = Counter(Path(folder).name for folder in self.workspace_folders)
+        labels = {}
+        for folder in self.workspace_folders:
+            path = Path(folder)
+            label = path.name or str(path)
+            if names[path.name] > 1:
+                label = f"{label}  \u2014  {path.parent.name or str(path.parent)}"
+            labels[folder] = label
+        return labels
+
+    def _makeRootRow(self, root_path: Path, label: str) -> list:
+        """The row of a workspace folder at the top level of the tree."""
+        root_item = QStandardItem(label)
+        root_item.setToolTip(str(root_path))
         root_mtime = root_path.stat().st_mtime if root_path.exists() else None
-        root_date_item = QStandardItem(self._format_mtime(root_mtime))
         root_item.setData(str(root_path), ROLE_PATH)
         root_item.setData(True, ROLE_IS_DIRECTORY)
         root_item.setData(False, ROLE_IS_LOADED)
-        self.model.appendRow([root_item, root_version_item, root_format_item, root_date_item])
+        return [root_item, QStandardItem(""), QStandardItem(""), QStandardItem(self._format_mtime(root_mtime))]
+
+    def _resetModel(self):
+        self.model.clear()
+        self.model.setHorizontalHeaderLabels(['Name', 'Version', 'Format', 'Date Modified'])
+        self.path_label.setText(f"Workspace: {', '.join(self.workspace_folders) or 'Not set'}")
+
+    def _expandedPaths(self, parent_index=QModelIndex(), paths=None) -> set:
+        """Paths of the expanded entries of the tree."""
+        paths = set() if paths is None else paths
+        for row in range(self.model.rowCount(parent_index)):
+            index = self.model.index(row, 0, parent_index)
+            if self.tree_view.isExpanded(index):
+                paths.add(index.data(ROLE_PATH))
+                self._expandedPaths(index, paths)
+        return paths
+
+    def _restoreExpansion(self, expanded, parent_index):
+        """Expand the sub-folders that were expanded before the tree was rebuilt."""
+        for row in range(self.model.rowCount(parent_index)):
+            index = self.model.index(row, 0, parent_index)
+            if index.data(ROLE_PATH) in expanded:
+                self.tree_view.expand(index)   # loads the folder (lazy loading)
+                self._restoreExpansion(expanded, index)
+
+    def populate_tree(self, path=None):
+        """
+        Populate the tree with a root for each workspace folder and its
+        immediate children. Uses lazy loading - subdirectories are loaded
+        when expanded. Folders that were expanded stay expanded; new
+        workspace folders are expanded.
         
-        # Load the root directory's immediate children
-        self._load_directory_children(root_item, root_path)
-        root_item.setData(True, ROLE_IS_LOADED)
-        
-        self.tree_view.expand(self.model.indexFromItem(root_item))
+        Args:
+            path (str | list, optional): Workspace folder(s) to show instead of
+                the current ones
+        """
+        if path is not None:
+            self.workspace_folders = self._folderList(path)
+        self.logger.debug(f"Populating tree with files from {', '.join(self.workspace_folders)}")
+        if self._showing_search:
+            expanded = self._full_tree_expanded or set()
+            self._showing_search = False
+        else:
+            expanded = self._expandedPaths()
+        known_roots = set(self._shown_roots)
+        self._resetModel()
+        labels = self._rootLabels()
+        for folder in self.workspace_folders:
+            root_path = Path(folder)
+            row = self._makeRootRow(root_path, labels[folder])
+            root_item = row[0]
+            self.model.appendRow(row)
+            
+            # Load the root directory's immediate children
+            self._load_directory_children(root_item, root_path)
+            root_item.setData(True, ROLE_IS_LOADED)
+            
+            root_index = self.model.indexFromItem(root_item)
+            if folder not in known_roots or folder in expanded:
+                self.tree_view.expand(root_index)
+                self._restoreExpansion(expanded, root_index)
+        self._shown_roots = list(self.workspace_folders)
         self.tree_view.resizeColumnToContents(0)
+        self._applyColumnMode()
+        self._updateEmptyState()
     
     def _on_item_expanded(self, index):
         """
@@ -371,16 +684,10 @@ class WorkspaceContents(QMainWindow):
         format_item = QStandardItem(file_format or "")
         
         # Set the tool icon for the file
-        icon_path = None
-        if class_ in ['CommandLineTool', 'ExpressionTool']:
-            icon_path = data.configuration.get('icons').get('tool') 
-        elif class_ in ['Workflow']:
-            icon_path = data.configuration.get('icons').get('workflow') 
-        
-        if icon_path and os.path.exists(icon_path):
-            file_item.setIcon(QIcon(icon_path))
-        elif icon_path:
-            self.logger.warning(f"Icon file not found: {icon_path}")
+        icon_key = {'CommandLineTool': 'tool', 'ExpressionTool': 'expressiontool',
+                    'Workflow': 'workflow'}.get(class_)
+        if icon_key:
+            file_item.setIcon(theme.icon(icon_key))
             
         parent_item.appendRow([file_item, version_item, format_item, file_date_item])
     
@@ -425,16 +732,10 @@ class WorkspaceContents(QMainWindow):
         file_date_item = QStandardItem(self._format_mtime(file_mtime))
         
         # Set the tool icon for the file
-        icon_path = None
-        if class_ in ['CommandLineTool', 'ExpressionTool']:
-            icon_path = data.configuration.get('icons').get('tool') 
-        elif class_ in ['Workflow']:
-            icon_path = data.configuration.get('icons').get('workflow') 
-        
-        if icon_path and os.path.exists(icon_path):
-            file_item.setIcon(QIcon(icon_path))
-        elif icon_path:
-            self.logger.warning(f"Icon file not found: {icon_path}")
+        icon_key = {'CommandLineTool': 'tool', 'ExpressionTool': 'expressiontool',
+                    'Workflow': 'workflow'}.get(class_)
+        if icon_key:
+            file_item.setIcon(theme.icon(icon_key))
             
         version_item = self._make_version_item(cwl_version)
         format_item = QStandardItem(file_format or "")
@@ -504,9 +805,9 @@ class WorkspaceContents(QMainWindow):
         """
         Handle click on the Rescan button by refreshing the file tree.
         """
-        if self.workspace_path:
-            self.logger.debug(f"Rescanning workspace: {self.workspace_path}")
-            self.populate_tree(self.workspace_path)
+        if self.workspace_folders:
+            self.logger.debug(f"Rescanning workspace: {', '.join(self.workspace_folders)}")
+            self.refresh()
         else:
             self.logger.warning("Cannot rescan - no workspace path set")
 
@@ -521,8 +822,8 @@ class WorkspaceContents(QMainWindow):
         self.sort_by_time_btn.setText(
             "Sort by Date Modified (Asc)" if self.sort_mode != 'time' else self.sort_by_time_btn.text()
         )
-        if self.workspace_path:
-            self.populate_tree(self.workspace_path)
+        if self.workspace_folders:
+            self.refresh()
 
     def on_sort_by_time(self):
         """
@@ -535,8 +836,8 @@ class WorkspaceContents(QMainWindow):
         self.sort_by_name_btn.setText(
             "Sort by Name (Asc)" if self.sort_mode != 'name' else self.sort_by_name_btn.text()
         )
-        if self.workspace_path:
-            self.populate_tree(self.workspace_path)
+        if self.workspace_folders:
+            self.refresh()
 
     def on_treeview_section_clicked(self, logicalIndex):
         """
@@ -558,38 +859,56 @@ class WorkspaceContents(QMainWindow):
         search_text = self.search_box.text().strip().lower()
         if not search_text:
             # Show all items
-            if self.workspace_path:
-                self.populate_tree(self.workspace_path)
+            self._search_text = ""
+            if self.workspace_folders:
+                self.populate_tree()
             return
         # Filter items by search text
+        self._search_text = search_text
         self.filter_tree_by_name(search_text)
 
     def on_cancel_search_clicked(self):
         """
         Handle click on the Cancel button. Clears the search box and shows all files.
         """
+        self._search_text = ""
         self.search_box.clear()
-        if self.workspace_path:
-            self.populate_tree(self.workspace_path)
+        if self.workspace_folders:
+            self.populate_tree()
 
     def filter_tree_by_name(self, search_text):
         """
-        Filter the tree view to show only items matching the search string.
+        Filter the tree view to show only items matching the search string,
+        in every workspace folder. Folders without a match are left out.
         Note: Search does a full scan and doesn't use lazy loading.
 
         Args:
             search_text (str): The string to search for in file and directory names.
         """
-        self.model.clear()
-        self.model.setHorizontalHeaderLabels(['Name', 'Version', 'Format', 'Date Modified'])
-        root_path = Path(self.workspace_path)
-        root_item = QStandardItem(root_path.name)
-        root_version_item = QStandardItem("")
-        root_format_item = QStandardItem("")
-        root_mtime = root_path.stat().st_mtime if root_path.exists() else None
-        root_date_item = QStandardItem(self._format_mtime(root_mtime))
-        root_item.setData(str(root_path), ROLE_PATH)
-        self.model.appendRow([root_item, root_version_item, root_format_item, root_date_item])
+        if not self._showing_search:
+            # remember the expanded folders to restore them after the search
+            self._full_tree_expanded = self._expandedPaths()
+            self._showing_search = True
+        self._resetModel()
+        labels = self._rootLabels()
+        for folder in self.workspace_folders:
+            row = self._makeRootRow(Path(folder), labels[folder])
+            self._filter_folder(row[0], Path(folder), search_text)
+            row[0].setData(True, ROLE_IS_LOADED)   # the results are not lazily loaded
+            if row[0].rowCount():
+                self.model.appendRow(row)
+                self.tree_view.expand(self.model.indexFromItem(row[0]))
+        if self.model.rowCount() == 0 and self.workspace_folders:
+            no_results = QStandardItem(f"No search results for \u201c{self.search_box.text().strip() or search_text}.\u201d")
+            no_results.setFlags(Qt.ItemFlag.NoItemFlags)
+            no_results.setForeground(QColor(theme.TEXT_MUTED))
+            self.model.appendRow(no_results)
+        self.tree_view.resizeColumnToContents(0)
+        self._applyColumnMode()
+        self._updateEmptyState()
+
+    def _filter_folder(self, root_item, root_path, search_text):
+        """Add the entries of a workspace folder matching the search string under its root item."""
         dir_nodes = {str(root_path): root_item}
         # Gather all files and directories
         all_files = []
@@ -636,8 +955,6 @@ class WorkspaceContents(QMainWindow):
                     self.add_file_to_tree(file_path, root_path, dir_nodes, c, cwl_version, file_format)
                 except Exception as e:
                     self.logger.warning(f"Error parsing file: {e}")
-        self.tree_view.expand(self.model.indexFromItem(root_item))
-        self.tree_view.resizeColumnToContents(0)
 
     def getDocumentMetadata(self, file_path):
         """

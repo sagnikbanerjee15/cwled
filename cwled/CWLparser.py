@@ -8,8 +8,10 @@ from pathlib import Path,PosixPath
 import json
 import logging
 import data
+import workspaceFolders
 from itertools import chain
 from typing import Union,Any,List
+import copy
 from copy import deepcopy
 import io
 # Change the import statement to only include confirmed available functions
@@ -158,11 +160,11 @@ class Parser(object):
             format (str, optional): The output format, either 'YAML' or 'JSON'.
                 Defaults to 'YAML'.
             inside_workspace (bool, optional): If True, enforces that the file
-                is saved within the configured workspace directory. Defaults to True.
+                is saved within one of the workspace folders. Defaults to True.
         
         Raises:
             Exception: If `inside_workspace` is True and the path is outside
-                the workspace.
+                the workspace folders.
         """
         if isinstance(filename, str):
             self.path=Path(filename)
@@ -171,9 +173,11 @@ class Parser(object):
         # check that the filename is inside the workspace
         if inside_workspace:
             
-            if not str(self.path).startswith( str(data.workspace_directory) ) :
-                self.logger.warning(f"Trying to save file {self.path} outside of the workspace {data.workspace_directory}")
-                raise Exception(f"Cannot save file {self.path} outside of the workspace {data.workspace_directory}")
+            if not workspaceFolders.isInsideWorkspace(self.path):
+                folders = ", ".join(workspaceFolders.folders()) or "<none>"
+                self.logger.warning(f"Trying to save file {self.path} outside of the workspace folders {folders}")
+                raise Exception(f"Cannot save file {self.path} outside of the workspace folders ({folders}). "
+                                "Add its folder to the workspace first.")
         if not self.path.parent.is_dir():
             self.path.parent.mkdir(parents=True, exist_ok=True)
         # print(f"Saving file: [{self.path.absolute()}] ({type(self.path)}) ")
@@ -191,7 +195,7 @@ class Parser(object):
         self._toHTML()
 
         # remove empty envVars
-        for req in self.cwl_tool.requirements:
+        for req in list(self.cwl_tool.requirements or []):
             if req.class_ == 'EnvVarRequirement' and hasattr(req, 'envDef'):
                 for env in req.envDef:
                     if env.envValue is None or env.envValue == "":
@@ -346,7 +350,7 @@ class Parser(object):
                     ps=PortSplitter(item, workflow_id=self.cwl_tool.id)
                     obj.symbols[idx] = ps.port_id
             if hasattr(obj, 'fields') and obj.fields:
-                print(f"====== having fields in object {obj} of type {type(obj)}")
+                logger.debug(f"====== having fields in object {obj} of type {type(obj)}")
                 for item in obj.fields:
                     clean_port(item)
         clean_port(self.cwl_tool)
@@ -1058,17 +1062,20 @@ def get_input_bindings(data: Any) -> list:
 
     if len(inputBindings) == 1:
         return inputBindings[0]  # Return the single input binding directly
-    
+    if not inputBindings:
+        return None
+
+    # merge into a copy: the bindings belong to the tool and must not change
+    merged = copy.copy(inputBindings[0])
     for i, binding in enumerate(inputBindings):
         # go through the list of inputBindings (e.g. from type_ or inputBinding)
         for a in list( binding.attrs ):
             # find all attributes in the inputBinding
             v=getattr(binding, a, None)
-            # add the value to the binding[0]
+            # add the value to the merged binding
             if v:
-                setattr(inputBindings[0], a, v)
-    # return the first inputBinding
-    return inputBindings[0] if inputBindings else None  # Return the first binding or None if empty
+                setattr(merged, a, v)
+    return merged
 
 
 

@@ -209,6 +209,8 @@ class ConfigDialog(QDialog):
         workspace_label = QLabel("Workspace:")
         workspace_label.setFixedWidth(150)
         self.workspace_edit = QLineEdit()
+        self.workspace_edit.setToolTip("The first workspace folder. More folders can be added with "
+                                       "File > Add Folder to Workspace...")
         
         # Get the workspace directory from configuration or use default
         workspace_dir = self.config.get('workspace', '')

@@ -3,6 +3,7 @@ import sys
 import json
 
 import data
+import workspaceFolders
 import logging
 import git
 from typing import Optional
@@ -40,14 +41,20 @@ class GitVersion:
     self.logger.debug(f"Generated version tag: {self.version_tag}")
     return self.version_tag
 
+  def _workspace_folder(self) -> Optional[str]:
+    """The workspace folder containing the file, or the current workspace folder."""
+    folder = workspaceFolders.containingFolder(self.file_path) if self.file_path else None
+    return folder or workspaceFolders.currentFolder()
+
   def _repo_candidate_paths(self) -> list:
     """Return possible paths that may belong to the target git repo."""
     candidates = []
     if self.file_path:
       candidates.append(os.path.abspath(self.file_path))
       candidates.append(os.path.dirname(os.path.abspath(self.file_path)))
-    if data.workspace_directory:
-      candidates.append(os.path.abspath(str(data.workspace_directory)))
+    workspace_folder = self._workspace_folder()
+    if workspace_folder:
+      candidates.append(os.path.abspath(workspace_folder))
 
     # Preserve order while removing duplicates.
     ordered = []
@@ -68,8 +75,9 @@ class GitVersion:
       except Exception as e:
         self.logger.debug(f"Ignoring repo lookup error for {candidate}: {e}")
 
-    if create_if_missing and data.workspace_directory:
-      ws = os.path.abspath(str(data.workspace_directory))
+    workspace_folder = self._workspace_folder()
+    if create_if_missing and workspace_folder:
+      ws = os.path.abspath(workspace_folder)
       self.logger.info(f"No git repository found. Initializing one in {ws}.")
       return git.Repo.init(ws)
 

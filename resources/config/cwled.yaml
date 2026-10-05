@@ -4,7 +4,11 @@ version: 0.1
 title: Input
 # Default workspace directory. Leave null to choose one on first run
 # (the app does not expand '~', so use an absolute path if you set it).
+# It is the first of the workspace folders.
 workspace: null
+# Folders of the workspace (roots of the Workspace panel), managed with
+# "Add Folder to Workspace..." and "Remove from Workspace"
+workspace_folders: []
 # specify the LLM configuration (provider, model, base_url, key env, etc.)
 # Supports standard cloud models as well as local endpoints (Ollama/LM Studio)
 llm:
@@ -26,10 +30,11 @@ code_editor:
   font_family: Monaco
   font_size: 13
 # Font and size for the command line window
+# (monospace: Composer's command line font, Courier at 13px)
 command_line_window:
   initial_width: 400
-  font_family: Monaco
-  font_size: 15
+  font_family: monospace
+  font_size: 13
 input_window:
   initial_width: 400
   id_width: 200

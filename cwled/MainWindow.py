@@ -1,7 +1,9 @@
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer, QSize, QMimeData, QUrl
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QMenu, QVBoxLayout, QHBoxLayout, QDialog,
-    QFileDialog, QLabel, QPushButton, QWidget,QMessageBox
+    QFileDialog, QLabel, QPushButton, QWidget,QMessageBox, QSplitter,
+    QTabWidget, QTabBar, QStackedWidget, QListWidget, QListWidgetItem,
+    QToolButton, QFrame, QAbstractItemView, QScrollArea, QSizePolicy
 )
 from PyQt6.QtGui import QAction, QIcon, QFont, QColor, QFontMetrics, QPixmap, QKeySequence
 from pathlib import Path, PurePath
@@ -22,17 +24,71 @@ from TabCodeEditor import CodeWindow
 from TabToolEditor import ToolEditor
 from TabSummary import WorkflowSummary
 from CWLtoolFactory import CWLRunner
-from widgets.qButtons import ErrorDialog
+from widgets.qButtons import ErrorDialog, QIconButton
 from typing import Union,List
 from pathlib import Path, PosixPath
 from TabWorkflowEditor import WorkflowEditor
 from ChildWindow import ChildWindow
 from WorkspaceContents import WorkspaceContents
+import workspaceFolders
 from logger import ErrorDialogHandler
 from draft import DraftTool
 import cwled
 from platformdirs import user_config_path, user_log_path
 import version
+import itertools
+import theme
+logger = logging.getLogger(__name__)
+
+
+class RecentFilesList(QListWidget):
+    """Recently opened files. They can be dragged, e.g. onto a workflow to
+    add them as steps."""
+
+    def __init__(self):
+        super().__init__()
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+
+    def mimeData(self, items):
+        mime_data = QMimeData()
+        paths = [item.data(Qt.ItemDataRole.UserRole) for item in items]
+        mime_data.setUrls([QUrl.fromLocalFile(path) for path in paths if path])
+        return mime_data
+
+
+class CreationEntry(QFrame):
+    """Clickable "create a new document" card of the start page (Composer: .creation-entry)."""
+
+    def __init__(self, icon: QIcon, title: str, description: str, callback, parent=None):
+        super().__init__(parent)
+        self.setObjectName('creationEntry')
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._callback = callback
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(14)
+        icon_label = QLabel()
+        icon_label.setPixmap(icon.pixmap(QSize(36, 36), self.devicePixelRatioF()))
+        icon_label.setFixedSize(40, 40)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(icon_label)
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(2)
+        text_layout.addWidget(theme.styleTitle(QLabel(title)))
+        description_label = QLabel(description)
+        description_label.setProperty('muted', True)
+        description_label.setWordWrap(True)
+        text_layout.addWidget(description_label)
+        layout.addLayout(text_layout, 1)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self._callback()
+        super().mouseReleaseEvent(event)
+
 # class that defines the main window
 class MainWindow( QMainWindow):
     '''
@@ -65,9 +121,10 @@ class MainWindow( QMainWindow):
                 # check if the file is an absolute path or not
                 # if it is not, we make it one using the workspace directory as the baseline
                 if Path( input_file ).is_absolute():
-                    # check that the file is inside the workspace
-                    if not str( Path( input_file ).parent ).startswith( str( data.workspace_directory ) ):
-                        self.logger.error(f"Input file {input_file} is outside the workspace directory {data.workspace_directory}. Cannot open.")
+                    # check that the file is inside one of the workspace folders
+                    if not workspaceFolders.isInsideWorkspace(input_file):
+                        self.logger.error(f"Input file {input_file} is outside the workspace folders "
+                                          f"{', '.join(workspaceFolders.folders())}. Cannot open.")
                         return
                     pass
                 else:
@@ -129,118 +186,401 @@ class MainWindow( QMainWindow):
         self.setMenu()
         QApplication.instance().focusChanged.connect(self.set_active_child_window)
         
-        # Create central widget with logo, app name, version and exit button
-        central_widget = QWidget()
-        layout = QVBoxLayout(central_widget)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Add logo
-        logo_label = QLabel()
-        pixmap = QPixmap(icon_path)
-        if not pixmap.isNull():
-            # Scale the logo if needed
-            scaled_pixmap = pixmap.scaled(200, 200, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            logo_label.setPixmap(scaled_pixmap)
-            logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(logo_label)
-        
-        # Add app name
-        app_name_label = QLabel("CWL Editor")
-        app_name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        font = QFont()
-        font.setPointSize(18)
-        font.setBold(True)
-        app_name_label.setFont(font)
-        layout.addWidget(app_name_label)
-        
-        # Add version
-        version_label = QLabel(f"Version {version.__version__}")
-        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(version_label)
-        gnu_label= QLabel("""Copyright (C) 2026  K.Mavrommatis
-    This program comes with 
-    ABSOLUTELY NO WARRANTY; 
-    for details check `COPYING` file. 
-    This is free software, and you are welcome to 
-    redistribute it under certain conditions.
-        """)
-        gnu_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(gnu_label)
-        # Add some spacing
-        layout.addSpacing(20)
-        
-        # add the location of the configuration file
-        config_label=QLabel(f"""Configuration directory: 
-        {user_config_path(appname='cwled')}""")
-        config_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(config_label)
-        layout.addSpacing(5) 
-        log_label=QLabel(f"""Log directory:
-        {user_log_path(appname='cwled')}""")
-        log_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(log_label)
-        # Add some spacing
-        layout.addSpacing(10)   
+        # Composer layout: side panel and document tabs above a status bar
+        self._buildLayout()
 
-        # Add tool creation buttons in a vertical layout
-        tool_buttons_layout = QVBoxLayout()
-        tool_buttons_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        tool_buttons_layout.setSpacing(10)  # Add some spacing between buttons
-        
-        # Create CommandLineTool button
-        cmd_tool_button = QPushButton("Create CommandLineTool")
-        cmd_tool_button.clicked.connect(self.onMenuNewCommandTool)
-        cmd_tool_button.setFixedWidth(250)  # Wider for better text display
-        tool_buttons_layout.addWidget(cmd_tool_button)
-        
-        # Create ExpressionTool button
-        expr_tool_button = QPushButton("Create ExpressionTool")
-        expr_tool_button.clicked.connect(self.onMenuNewExpressionTool)
-        expr_tool_button.setFixedWidth(250)  # Wider for better text display
-        tool_buttons_layout.addWidget(expr_tool_button)
-        
-        # Create Workflow button
-        workflow_button = QPushButton("Create Workflow")
-        workflow_button.clicked.connect(self.onMenuNewWorkflow)
-        workflow_button.setFixedWidth(250)  # Wider for better text display
-        tool_buttons_layout.addWidget(workflow_button)
-        
-        # Create a horizontal layout for workspace buttons
-        workspace_buttons_layout = QHBoxLayout()
-        workspace_buttons_layout.setSpacing(10)  # Add some spacing between buttons
-        
-        # Create Open Workspace button
-        workspace_button = QPushButton("Open Workspace")
-        workspace_button.clicked.connect(self.onOpenWorkspace)
-        workspace_button.setFixedWidth(188)  # Adjusted width to fit with the Set button
-        workspace_buttons_layout.addWidget(workspace_button)
-        
-        # Create Set button
-        set_workspace_button = QPushButton("Set")
-        set_workspace_button.clicked.connect(self.onSetWorkspace)
-        set_workspace_button.setFixedWidth(52)  # Smaller width for Set button
-        workspace_buttons_layout.addWidget(set_workspace_button)
-        
-        # Add workspace buttons to the tool buttons layout
-        tool_buttons_layout.addLayout(workspace_buttons_layout)
-        
-        # Add the tool buttons layout to the main layout
-        layout.addLayout(tool_buttons_layout)
-        
-        # Add some spacing between tool buttons and exit button
-        layout.addSpacing(10)
-        
-        # Add exit button
-        exit_button = QPushButton("Exit")
-        exit_button.clicked.connect(self.close)
-        exit_button.setFixedWidth(100)
-        exit_button_layout = QHBoxLayout()
-        exit_button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        exit_button_layout.addWidget(exit_button)
-        layout.addLayout(exit_button_layout)
-        
-        self.setCentralWidget(central_widget)
-        
+    def _buildLayout(self):
+        """
+        Build the Rabix Composer style main window: a side panel with the
+        workspace browser on the left, a tab bar with the open documents
+        ("workbox") on the right and a status bar at the bottom.
+        Documents open as tabs instead of separate windows.
+        """
+        self.resize(self._initialSize())
+
+        splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        splitter.setObjectName('mainSplitter')
+        splitter.setHandleWidth(1)
+        splitter.setChildrenCollapsible(False)
+
+        self.sidebar = self._buildSidebar()
+        splitter.addWidget(self.sidebar)
+
+        self.workbox = QTabWidget(self)
+        self.workbox.setObjectName('workbox')
+        self.workbox.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.workbox.setTabsClosable(True)
+        self.workbox.setMovable(True)
+        self.workbox.setUsesScrollButtons(True)
+        self.workbox.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
+        self.workbox.tabBar().setExpanding(False)
+        self.workbox.tabCloseRequested.connect(self.onWorkboxTabClose)
+        self.workbox.currentChanged.connect(self.onWorkboxCurrentChanged)
+
+        new_tab_button = QToolButton(self.workbox)
+        new_tab_button.setIcon(theme.icon('plus', color=theme.TEXT_MUTED, active_color=theme.WHITE))
+        new_tab_button.setToolTip("New file")
+        new_tab_button.setAutoRaise(True)
+        new_tab_button.clicked.connect(self.showWelcomeTab)
+        self.workbox.setCornerWidget(new_tab_button, Qt.Corner.TopRightCorner)
+
+        self.welcome = self._buildWelcomePage()
+        self.showWelcomeTab()
+        splitter.addWidget(self.workbox)
+
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([270, max(400, self.width() - 270)])
+        self.setCentralWidget(splitter)
+
+        # Status bar (Composer: ct-status-bar)
+        status_bar = self.statusBar()
+        status_bar.setSizeGripEnabled(False)
+        status_bar.setFixedHeight(theme.STATUS_BAR_HEIGHT)
+        self.workspace_status = QLabel()
+        status_bar.addWidget(self.workspace_status, 1)
+        version_status = QLabel(f"CWLed {version.__version__}")
+        version_status.setProperty('muted', True)
+        status_bar.addPermanentWidget(version_status)
+        self.updateWorkspaceViews()
+        self.updateRecentLists()
+
+    def _initialSize(self) -> QSize:
+        """Initial size from the configuration, clamped to the available screen."""
+        main_window_cfg = data.configuration.get('main_window', {}) if data.configuration else {}
+        try:
+            width = int(main_window_cfg.get('initial_width', 1400))
+            height = int(main_window_cfg.get('initial_height', 900))
+        except (TypeError, ValueError):
+            width, height = 1400, 900
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            width = min(width, int(available.width() * 0.95))
+            height = min(height, int(available.height() * 0.95))
+        return QSize(max(900, width), max(600, height))
+
+    def _buildSidebar(self) -> QWidget:
+        """Left panel: application title, then 'Workspace' / 'Recent' panels."""
+        sidebar = QWidget(self)
+        sidebar.setObjectName('sidebar')
+        sidebar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        sidebar.setMinimumWidth(200)
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        title_bar = QWidget(sidebar)
+        title_bar.setObjectName('titleBar')
+        title_bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        title_bar.setFixedHeight(theme.ACTION_BAR_HEIGHT)
+        title_layout = QHBoxLayout(title_bar)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        app_title = QLabel(
+            f'<span style="font-family:\'{theme.TITLE_FONT_FAMILY}\'">CWL</span>'
+            f'<span style="font-family:\'{theme.TITLE_FONT_FAMILY}\'; font-weight:300">ed</span>'
+        )
+        app_title.setObjectName('appTitle')
+        title_font = QFont(theme.TITLE_FONT_FAMILY)
+        title_font.setPointSizeF(QApplication.font().pointSizeF() + 2)
+        app_title.setFont(title_font)
+        title_layout.addWidget(app_title)
+        layout.addWidget(title_bar)
+
+        # Panel selector (Composer: "My Projects | Public Apps")
+        self.sidebar_tabs = QTabBar(sidebar)
+        self.sidebar_tabs.setExpanding(True)
+        self.sidebar_tabs.setDrawBase(False)
+        self.sidebar_tabs.addTab("Workspace")
+        self.sidebar_tabs.addTab("Recent")
+        layout.addWidget(self.sidebar_tabs)
+
+        self.sidebar_pages = QStackedWidget(sidebar)
+        self.sidebar_tabs.currentChanged.connect(self.sidebar_pages.setCurrentIndex)
+
+        # one root per workspace folder (Composer "Local Files")
+        self.workspace_panel = WorkspaceContents(workspace_path=workspaceFolders.folders(), parent=sidebar, sidebar=True)
+        self.workspace_panel.setWindowFlags(Qt.WindowType.Widget)
+        self.workspace_panel.fileSelected.connect(self.onCreateWindowFromFile)
+        self.workspace_panel.addFolderRequested.connect(self.onAddWorkspaceFolder)
+        self.workspace_panel.removeFolderRequested.connect(self.onRemoveWorkspaceFolder)
+        self.workspace_panel.currentFolderChanged.connect(self.onCurrentWorkspaceFolderChanged)
+        self.sidebar_pages.addWidget(self.workspace_panel)
+
+        self.recent_panel = self._buildRecentList()
+        self.sidebar_pages.addWidget(self.recent_panel)
+        layout.addWidget(self.sidebar_pages, 1)
+        return sidebar
+
+    def _buildRecentList(self) -> QListWidget:
+        recent_list = RecentFilesList()
+        recent_list.setIconSize(QSize(16, 16))
+        recent_list.itemDoubleClicked.connect(
+            lambda item: self.onOpenRecentFile(item.data(Qt.ItemDataRole.UserRole)))
+        self._recent_lists = getattr(self, '_recent_lists', []) + [recent_list]
+        return recent_list
+
+    def _buildWelcomePage(self) -> QWidget:
+        """
+        Start page, modelled on Composer's "New File" tab: actions to create
+        new documents next to the recently opened files, followed by the
+        workspace settings and information about the application.
+        """
+        page = QWidget()
+        page.setObjectName('welcome')
+        page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+
+        action_bar = QWidget(page)
+        action_bar.setObjectName('actionBar')
+        action_bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        action_bar.setFixedHeight(theme.ACTION_BAR_HEIGHT)
+        page_layout.addWidget(action_bar)
+
+        content = QWidget(page)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(14, 14, 14, 14)
+        content_layout.setSpacing(18)
+
+        columns = QHBoxLayout()
+        columns.setSpacing(14)
+
+        # Actions column
+        actions = QVBoxLayout()
+        actions.setSpacing(8)
+        actions.addWidget(theme.styleTitle(QLabel("Actions")))
+        actions.addWidget(CreationEntry(
+            theme.icon('workflow'), "New Workflow",
+            "Workflows are chains of interconnected tools.", self.onMenuNewWorkflow))
+        actions.addWidget(CreationEntry(
+            theme.icon('tool'), "New Command Line Tool",
+            "Tools are programs for processing data.", self.onMenuNewCommandTool))
+        actions.addWidget(CreationEntry(
+            theme.icon('expressiontool'), "New Expression Tool",
+            "Expression tools transform data with JavaScript.", self.onMenuNewExpressionTool))
+        actions.addWidget(CreationEntry(
+            theme.icon('ai', color=theme.SKY), "Draft Command Line Tool",
+            "Draft a tool from its documentation with an LLM.", self.onMenuNewDraftCommandTool))
+        actions.addStretch(1)
+        columns.addLayout(actions, 1)
+
+        # Recently opened column
+        recent = QVBoxLayout()
+        recent.setSpacing(8)
+        recent.addWidget(theme.styleTitle(QLabel("Recently Opened")))
+        recent.addWidget(self._buildRecentList(), 1)
+        columns.addLayout(recent, 1)
+        content_layout.addLayout(columns, 1)
+
+        # Workspace section: the workspace folders
+        workspace_section = QVBoxLayout()
+        workspace_section.setSpacing(8)
+        workspace_section.addWidget(theme.styleTitle(QLabel("Workspace")))
+        workspace_row = QHBoxLayout()
+        # one row per folder; scrolls when there are many
+        folders_widget = QWidget()
+        self.welcome_workspace_folders = QVBoxLayout(folders_widget)
+        self.welcome_workspace_folders.setContentsMargins(0, 0, 0, 0)
+        self.welcome_workspace_folders.setSpacing(0)
+        self.welcome_workspace_scroll = QScrollArea()
+        self.welcome_workspace_scroll.setWidget(folders_widget)
+        self.welcome_workspace_scroll.setWidgetResizable(True)
+        self.welcome_workspace_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.welcome_workspace_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.welcome_workspace_scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        workspace_row.addWidget(self.welcome_workspace_scroll, 1)
+        open_workspace_button = QPushButton("Open Workspace")
+        open_workspace_button.clicked.connect(self.onOpenWorkspace)
+        workspace_row.addWidget(open_workspace_button, 0, Qt.AlignmentFlag.AlignTop)
+        add_folder_button = QPushButton("Add Folder...")
+        add_folder_button.setToolTip("Add a folder to the workspace")
+        add_folder_button.clicked.connect(self.onAddWorkspaceFolder)
+        workspace_row.addWidget(add_folder_button, 0, Qt.AlignmentFlag.AlignTop)
+        workspace_section.addLayout(workspace_row)
+        content_layout.addLayout(workspace_section)
+
+        # About section (Composer: getting started)
+        about_section = QVBoxLayout()
+        about_section.setSpacing(8)
+        about_section.addWidget(theme.styleTitle(QLabel("About")))
+        about = QFrame()
+        about.setObjectName('formSection')
+        about_layout = QHBoxLayout(about)
+        about_layout.setContentsMargins(13, 11, 13, 11)
+        about_layout.setSpacing(16)
+        logo_label = QLabel()
+        pixmap = QPixmap(data.configuration.get('icons').get('cwllogo'))
+        if not pixmap.isNull():
+            logo_label.setPixmap(pixmap.scaled(96, 96, Qt.AspectRatioMode.KeepAspectRatio,
+                                               Qt.TransformationMode.SmoothTransformation))
+        about_layout.addWidget(logo_label, 0, Qt.AlignmentFlag.AlignTop)
+        about_text = QLabel(
+            f"<b>CWL Editor</b> &nbsp;version {version.__version__}<br>"
+            "Copyright (C) 2026 K.Mavrommatis. This program comes with ABSOLUTELY NO WARRANTY; "
+            "for details check the `COPYING` file. This is free software, and you are welcome "
+            "to redistribute it under certain conditions.<br><br>"
+            f"Configuration directory: {user_config_path(appname='cwled')}<br>"
+            f"Log directory: {user_log_path(appname='cwled')}"
+        )
+        about_text.setWordWrap(True)
+        about_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        about_layout.addWidget(about_text, 1)
+        user_guide_button = QPushButton("User Guide")
+        theme.setButtonRole(user_guide_button, 'link')
+        user_guide_button.setIcon(theme.icon('book', color=theme.SKY))
+        user_guide_button.clicked.connect(self.onMenuHelp)
+        about_layout.addWidget(user_guide_button, 0, Qt.AlignmentFlag.AlignTop)
+        about_section.addWidget(about)
+        content_layout.addLayout(about_section)
+
+        page_layout.addWidget(content, 1)
+        return page
+
+    def showWelcomeTab(self):
+        """Show the start page, re-opening its tab if it was closed."""
+        index = self.workbox.indexOf(self.welcome)
+        if index < 0:
+            index = self.workbox.insertTab(0, self.welcome, theme.icon('file-o', color=theme.SMOKE), "Welcome")
+        self.workbox.setCurrentIndex(index)
+
+    def updateWorkspaceViews(self):
+        """Refresh every view showing the workspace folders."""
+        self._updateWorkspaceStatus()
+        if hasattr(self, 'welcome_workspace_folders'):
+            self._refreshWelcomeWorkspace()
+        if hasattr(self, 'workspace_panel'):
+            self.workspace_panel.setWorkspaceFolders(workspaceFolders.folders())
+
+    def _updateWorkspaceStatus(self):
+        """Status bar: the current workspace folder (where new files go) and the number of others."""
+        if not hasattr(self, 'workspace_status'):
+            return
+        folders = workspaceFolders.folders()
+        text = f"Workspace: {workspaceFolders.currentFolder() or 'no folder'}"
+        if len(folders) > 1:
+            others = len(folders) - 1
+            text += f"  (+{others} more folder{'s' if others > 1 else ''})"
+        self.workspace_status.setText(text)
+        self.workspace_status.setToolTip("Workspace folders:\n" + "\n".join(folders) if folders else "")
+
+    def _refreshWelcomeWorkspace(self):
+        """Start page: one row per workspace folder."""
+        layout = self.welcome_workspace_folders
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        folders = workspaceFolders.folders()
+        if not folders:
+            empty_label = QLabel("No folders in the workspace.")
+            empty_label.setProperty('muted', True)
+            layout.addWidget(empty_label)
+        for folder in folders:
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
+            icon_label = QLabel()
+            icon_label.setPixmap(theme.icon('folder').pixmap(QSize(14, 14), self.devicePixelRatioF()))
+            row_layout.addWidget(icon_label)
+            folder_label = QLabel(folder)
+            folder_label.setProperty('muted', True)
+            folder_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            row_layout.addWidget(folder_label)
+            remove_button = QIconButton('times', "Remove from Workspace")
+            remove_button.setFixedSize(QSize(22, 22))
+            remove_button.setIconSize(QSize(12, 12))
+            remove_button.clicked.connect(lambda _checked=False, f=folder: self.onRemoveWorkspaceFolder(f))
+            row_layout.addWidget(remove_button)
+            row_layout.addStretch(1)
+            layout.addWidget(row)
+        layout.addStretch(1)
+        # show up to four folders, scroll for more
+        row_height = max(22, QFontMetrics(self.font()).height() + 4)
+        self.welcome_workspace_scroll.setMinimumHeight(row_height)
+        self.welcome_workspace_scroll.setMaximumHeight(row_height * min(4, max(1, len(folders))))
+
+    def updateRecentLists(self):
+        """Refresh the 'Recent' side panel and the start page list."""
+        recent_files = [f for f in reversed(data.configuration.get('recents', []) or [])
+                        if self._fileExists(f)]
+        for recent_list in getattr(self, '_recent_lists', []):
+            recent_list.clear()
+            for file_path in recent_files:
+                item = QListWidgetItem(theme.icon('file-o', color=theme.SMOKE), Path(file_path).name)
+                item.setToolTip(str(file_path))
+                item.setData(Qt.ItemDataRole.UserRole, str(file_path))
+                recent_list.addItem(item)
+            if not recent_files:
+                placeholder = QListWidgetItem("No recent files")
+                placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
+                recent_list.addItem(placeholder)
+
+    @staticmethod
+    def _fileExists(file_path) -> bool:
+        try:
+            return Path(file_path).exists()
+        except (OSError, ValueError):
+            return False
+
+    def _documentTitle(self, window: ChildWindow) -> str:
+        """Short tab title for a document: its file name, label or id."""
+        display_path = window.getDisplayFilePath()
+        if display_path and display_path != "<unsaved>":
+            title = Path(display_path).name
+        else:
+            cwl_tool = getattr(window, 'cwl_tool', None)
+            title = getattr(cwl_tool, 'label', None) or str(getattr(cwl_tool, 'id', '') or '')
+            title = title.rstrip('/').split('/')[-1].split('#')[-1] or f"Untitled {window.cwl_type}"
+        return f"*{title}" if window.hasChanged else title
+
+    def _documentIcon(self, window: ChildWindow) -> QIcon:
+        icon_key = {'Workflow': 'workflow', 'ExpressionTool': 'expressiontool'}.get(window.cwl_type, 'tool')
+        return theme.icon(icon_key)
+
+    def _refreshDocumentTab(self, window: ChildWindow):
+        index = self.workbox.indexOf(window)
+        if index < 0:
+            return
+        self.workbox.setTabText(index, self._documentTitle(window))
+        self.workbox.setTabIcon(index, self._documentIcon(window))
+        self.workbox.setTabToolTip(index, window.windowTitle())
+
+    def _showDocument(self, window: ChildWindow):
+        """Bring a document tab to the front."""
+        if self.workbox.indexOf(window) >= 0:
+            self.workbox.setCurrentWidget(window)
+            self.active_window = window
+            window.setFocus()
+        else:
+            window.raise_()
+            window.activateWindow()
+
+    def onWorkboxTabClose(self, index: int):
+        """Close a document tab; the document may veto it (unsaved changes)."""
+        widget = self.workbox.widget(index)
+        if widget is None:
+            return
+        if widget is self.welcome:
+            self.workbox.removeTab(index)
+            return
+        # ChildWindow.closeEvent prompts for unsaved changes and emits
+        # windowClosed, which removes the tab (remove_window_from_menu).
+        widget.close()
+
+    def onWorkboxCurrentChanged(self, index: int):
+        widget = self.workbox.widget(index)
+        self.active_window = widget if isinstance(widget, ChildWindow) else None
+
+    def closeEvent(self, event):
+        """Closing the main window closes every document (each may veto)."""
+        for window in list(self.open_windows.values()):
+            if isinstance(window, ChildWindow) and not window.close():
+                event.ignore()
+                return
+        super().closeEvent(event)
 
     def setupGlobalErrorDialogLogging(self):
         """Set up global error dialog logging for the entire application."""
@@ -272,8 +612,7 @@ class MainWindow( QMainWindow):
         for window in self.open_windows.values():
             if hasattr(window, 'file_path') and window.file_path:
                 if str(Path(window.file_path).resolve()) == resolved_path:
-                    window.raise_()
-                    window.activateWindow()
+                    self._showDocument(window)
                     return
 
         child_window_id=self.add_window_to_menu()
@@ -301,6 +640,16 @@ class MainWindow( QMainWindow):
         file_reload=QAction(  "Reload file",self)
         file_reload.setShortcut(QKeySequence.StandardKey.Refresh)
         file_reload.triggered.connect(self.onMenuReloadFile)
+        file_add_folder=QAction(  "Add Folder to Workspace...",self)
+        file_add_folder.setToolTip("Add a folder to the workspace")
+        file_add_folder.triggered.connect(self.onAddWorkspaceFolder)
+        file_close=QAction(  "Close tab",self)
+        file_close.setShortcut(QKeySequence.StandardKey.Close)
+        file_close.triggered.connect(lambda: self.onWorkboxTabClose(self.workbox.currentIndex()))
+        file_exit=QAction(  "E&xit",self)
+        file_exit.setShortcut(QKeySequence.StandardKey.Quit)
+        file_exit.setMenuRole(QAction.MenuRole.QuitRole)
+        file_exit.triggered.connect(self.close)
         # create a submenu for New
         
 
@@ -354,6 +703,11 @@ class MainWindow( QMainWindow):
         self.recent_menu = QMenu("Recent", self)
         self.file_menu.addMenu(self.recent_menu)
         self.updateRecentMenu()
+        self.file_menu.addSeparator()
+        self.file_menu.addAction( file_add_folder )
+        self.file_menu.addSeparator()
+        self.file_menu.addAction( file_close )
+        self.file_menu.addAction( file_exit )
         
 
         self.tools_menu=self.menu.addMenu( "&Tools")
@@ -437,6 +791,8 @@ class MainWindow( QMainWindow):
                     if file_path in data.configuration['recents']:
                         data.configuration['recents'].remove(file_path)
                 data.configuration_manager.saveConfiguration()
+
+        self.updateRecentLists()
     
     def onOpenRecentFile(self, file_path:str):
         """
@@ -478,8 +834,10 @@ class MainWindow( QMainWindow):
                 break
                 
         if not any_window_active:
-            self.logger.info("There does not seem to be any active window")
-            self.active_window = None
+            # Focus is outside the documents (side panel, menus...): the
+            # document shown in the workbox stays the active one.
+            current = self.workbox.currentWidget() if hasattr(self, 'workbox') else None
+            self.active_window = current if isinstance(current, ChildWindow) else None
         
         # Only log the window_id if we have an active window
         if self.active_window:
@@ -489,8 +847,13 @@ class MainWindow( QMainWindow):
     
     def add_window_to_menu(self, cwl_type:str='CommandLineTool'):
 
-        window_id = len(self.open_windows) + 1
+        # ids must stay unique after documents are closed
+        if not hasattr(self, '_window_ids'):
+            self._window_ids = itertools.count(1)
+        window_id = next(self._window_ids)
         child_window = ChildWindow(window_id=window_id, cwl_type=cwl_type, parent=self)
+        # Documents live as tabs of the workbox rather than as separate windows
+        child_window.setWindowFlags(Qt.WindowType.Widget)
         
         # Set the same icon for the child window
         icon_path = data.configuration.get('icons').get('cwllogo') 
@@ -514,12 +877,11 @@ class MainWindow( QMainWindow):
         self.window_menu.addAction(new_window)
         self.window_actions[window_id]=new_window
         
-        # Show the window
-        child_window.show()
-        
-        # Activate and raise the window to ensure it's in focus
-        child_window.activateWindow()
-        child_window.raise_()
+        # Show the document as a new tab and bring it to the front
+        self.workbox.addTab(child_window, self._documentIcon(child_window), self._documentTitle(child_window))
+        child_window.windowTitleChanged.connect(lambda _title, w=child_window: self._refreshDocumentTab(w))
+        self._refreshDocumentTab(child_window)
+        self._showDocument(child_window)
         
         return(window_id)
         
@@ -528,6 +890,8 @@ class MainWindow( QMainWindow):
         if window_id in self.window_actions:
             self.logger.debug(f"Window {window_id} is in the list and its name will be updated to {new_name}")
             self.window_actions[window_id].setText(new_name)
+            if window_id in self.open_windows:
+                self._refreshDocumentTab(self.open_windows[window_id])
         else:
             self.logger.warning(f"Window {window_id} is not in the list of windows")
 
@@ -540,8 +904,11 @@ class MainWindow( QMainWindow):
             # Remove the action from our dictionary
             self.window_actions.pop(window_id, None)
         
-        # Remove the closed window from the open windows dictionary
-        self.open_windows.pop(window_id, None)
+        # Remove the closed window from the open windows dictionary and its tab
+        window = self.open_windows.pop(window_id, None)
+        if window is not None and self.workbox.indexOf(window) >= 0:
+            self.workbox.removeTab(self.workbox.indexOf(window))
+            window.deleteLater()
         
         # If this was the active window, set active_window to None
         if self.active_window and hasattr(self.active_window, 'window_id') and self.active_window.window_id == window_id:
@@ -596,8 +963,7 @@ class MainWindow( QMainWindow):
 
     def onMenuFocus(self, window_id):
         if window_id in self.open_windows:
-            self.open_windows[window_id].raise_()  # Bring the window to the front
-            self.open_windows[window_id].activateWindow() 
+            self._showDocument(self.open_windows[window_id])
 
 
 
@@ -685,7 +1051,7 @@ class MainWindow( QMainWindow):
 
     def onMenuOpenFile(self):
 
-        home_dir = str(data.workspace_directory) if hasattr(data, 'workspace_directory') else str(Path.home())
+        home_dir = workspaceFolders.currentFolder() or str(Path.home())
         fname=QFileDialog.getOpenFileName(
             self, 
             'Open file', 
@@ -694,7 +1060,7 @@ class MainWindow( QMainWindow):
         
         if fname[0]:
             self.logger.info(f"Opening file {fname[0]}")
-            print(f"Opening file {fname[0]}")
+            logger.debug(f"Opening file {fname[0]}")
             # self.file_path=fname[0]
             
             # self.pass_action_to_active_window("File Open")
@@ -734,9 +1100,9 @@ class MainWindow( QMainWindow):
             return None
         else:
             aw=self.active_window
-        # Use workspace directory by default, or fall back to existing file location or home directory
-        if hasattr(data, 'workspace_directory'):
-            home_dir = str(data.workspace_directory)
+        # Use the current workspace folder by default, or fall back to existing file location or home directory
+        if workspaceFolders.currentFolder():
+            home_dir = workspaceFolders.currentFolder()
         elif self.active_window.file_path:
             home_dir = str(Path(self.active_window.file_path).parent)
         else:
@@ -891,43 +1257,45 @@ class MainWindow( QMainWindow):
             max-width: 900px;
             margin: 0 auto;
             padding: 20px;
-            color: #333;
-            background-color: #fff;
+            color: {theme.TEXT};
+            background-color: {theme.BODY_BG};
         }}
         h1 {{
-            color: #2c3e50;
-            border-bottom: 2px solid #3498db;
+            color: {theme.WHITE};
+            font-family: Montserrat, sans-serif;
+            border-bottom: 2px solid {theme.SKY};
             padding-bottom: 10px;
         }}
         h2 {{
-            color: #34495e;
+            color: {theme.TEXT};
+            font-family: Montserrat, sans-serif;
             margin-top: 30px;
-            border-bottom: 1px solid #ecf0f1;
+            border-bottom: 1px solid {theme.BLACK};
             padding-bottom: 8px;
         }}
         h3 {{
-            color: #555;
+            color: {theme.TEXT};
             margin-top: 20px;
         }}
         code {{
-            background-color: #f4f4f4;
+            background-color: {theme.INPUT_BG};
             padding: 2px 6px;
-            border-radius: 3px;
+            border-radius: 2px;
             font-family: 'Monaco', 'Courier New', monospace;
             font-size: 0.9em;
-            color: #c7254e;
+            color: {theme.CODE_ARGS};
         }}
         pre {{
-            background-color: #f6f8fa;
+            background-color: {theme.TERMINAL_BG};
             padding: 16px;
-            border-radius: 6px;
+            border-radius: 2px;
             overflow-x: auto;
-            border: 1px solid #e1e4e8;
+            border: 1px solid {theme.BLACK};
         }}
         pre code {{
             background-color: transparent;
             padding: 0;
-            color: #24292e;
+            color: {theme.CODE_STREAM};
         }}
         table {{
             border-collapse: collapse;
@@ -935,19 +1303,19 @@ class MainWindow( QMainWindow):
             margin: 20px 0;
         }}
         th, td {{
-            border: 1px solid #ddd;
+            border: 1px solid {theme.BLACK};
             padding: 12px;
             text-align: left;
         }}
         th {{
-            background-color: #f2f2f2;
+            background-color: {theme.PANEL_BG};
             font-weight: bold;
         }}
         tr:nth-child(even) {{
-            background-color: #f9f9f9;
+            background-color: {theme.INPUT_BG};
         }}
         a {{
-            color: #3498db;
+            color: {theme.SKY};
             text-decoration: none;
         }}
         a:hover {{
@@ -958,14 +1326,14 @@ class MainWindow( QMainWindow):
             height: auto;
             display: block;
             margin: 20px auto;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            border: 1px solid {theme.BLACK};
+            border-radius: 2px;
         }}
         blockquote {{
-            border-left: 4px solid #3498db;
+            border-left: 4px solid {theme.SKY};
             margin: 20px 0;
             padding: 10px 20px;
-            background-color: #f9f9f9;
+            background-color: {theme.PANEL_BG};
         }}
         ul, ol {{
             padding-left: 30px;
@@ -1000,81 +1368,81 @@ class MainWindow( QMainWindow):
 
     def onOpenWorkspace(self):
         """
-        Opens the WorkspaceContents window to browse and select files from a workspace.
-        Also adds the workspace window to the Window menu.
-        If the workspace window is already open, brings it to the front.
+        Show the workspace browser in the side panel and rescan the workspace.
         """
         self.logger.debug("Opening workspace browser")
+        self.sidebar.show()
+        self.sidebar_tabs.setCurrentIndex(self.sidebar_pages.indexOf(self.workspace_panel))
+        self.workspace_panel.on_rescan_clicked()
+        self.workspace_panel.search_box.setFocus()
 
-        # If workspace window already exists and is visible, bring it forward
-        workspace_id = "workspace"
-        if workspace_id in self.open_windows:
-            existing = self.open_windows[workspace_id]
-            if existing.isVisible():
-                existing.raise_()
-                existing.activateWindow()
-                return
-
-        workspace_path = data.workspace_directory if hasattr(data, 'workspace_directory') else str(Path.home())
-        workspace_window = WorkspaceContents(workspace_path=workspace_path, parent=self)
-        workspace_window.fileSelected.connect(self.onCreateWindowFromFile)
-        workspace_window.show()
-        workspace_window.activateWindow()
-        workspace_window.raise_()
-
-        # Add to open_windows and window menu
-        workspace_id = "workspace"
-        self.open_windows[workspace_id] = workspace_window
-        workspace_action = QAction("Workspace", self)
-        workspace_action.triggered.connect(lambda: workspace_window.raise_())
-        self.window_menu.addAction(workspace_action)
-        self.window_actions[workspace_id] = workspace_action
-
-        # Remove menu entry when workspace window is closed
-        def workspace_close_event(event):
-            self.window_menu.removeAction(workspace_action)
-            self.open_windows.pop(workspace_id, None)
-            self.window_actions.pop(workspace_id, None)
-            event.accept()
-        workspace_window.closeEvent = workspace_close_event
-
-    def onSetWorkspace(self):
+    def onAddWorkspaceFolder(self):
         """
-        Opens a directory dialog to set the workspace directory.
-        This is equivalent to using the --workspace command line argument.
+        Choose a folder and add it to the workspace (Composer "Add a Folder").
         """
-        self.logger.debug("Setting workspace directory")
-        
-        # Get the current workspace directory if it exists
-        current_dir = data.workspace_directory if hasattr(data, 'workspace_directory') else str(Path.home())
-        
-        # Open directory selection dialog
-        new_workspace = QFileDialog.getExistingDirectory(
+        self.logger.debug("Adding a folder to the workspace")
+        start_directory = workspaceFolders.currentFolder() or str(Path.home())
+        folder = QFileDialog.getExistingDirectory(
             self,
-            "Select Workspace Directory",
-            str(current_dir),
+            "Add a Folder to the Workspace",
+            start_directory,
             QFileDialog.Option.ShowDirsOnly
         )
-        
-        if new_workspace:
-            # Convert to Path object for easier handling
-            workspace_path = Path(new_workspace)
-            
-            # Store the workspace path in data module to make it available application-wide
-            data.workspace_directory = str(workspace_path.absolute())
-            self.logger.info(f"Set workspace directory to: {data.workspace_directory}")
-            
-            # Show a confirmation message
-            message = f"\u2705 Workspace directory set successfully."
-            details = f"The workspace directory has been changed to:\n{data.workspace_directory}"
-            
-            QMessageBox.information(
-                self,
-                "Workspace set",
-                details
-            )
-            # dialog = QMessageBox.information(message, details, title="Workspace Set")
-            
-            # dialog.exec()
+        if folder:
+            self.addWorkspaceFolder(folder)
 
-        os.chdir(str(data.workspace_directory))
+    def addWorkspaceFolder(self, folder) -> bool:
+        """
+        Add a folder to the workspace and show it in the Workspace panel. A
+        folder already in the workspace is refused; workspace folders inside
+        the new folder are replaced by it.
+
+        Returns:
+            True if the folder was added.
+        """
+        status, related = workspaceFolders.addFolder(folder)
+        if status == workspaceFolders.DUPLICATE:
+            QMessageBox.information(self, "Add a Folder", f"{folder} is already in the workspace.")
+            return False
+        if status == workspaceFolders.NESTED:
+            QMessageBox.information(self, "Add a Folder",
+                                    f"{folder} is already in the workspace, inside {related[0]}.")
+            return False
+        self.updateWorkspaceViews()
+        self.sidebar.show()
+        self.sidebar_tabs.setCurrentIndex(self.sidebar_pages.indexOf(self.workspace_panel))
+        self.workspace_panel.showFolder(workspaceFolders.currentFolder())
+        message = f"Added {workspaceFolders.currentFolder()} to the workspace"
+        if related:
+            message += f", in place of {', '.join(related)}"
+        self.statusBar().showMessage(message, 5000)
+        return True
+
+    def onRemoveWorkspaceFolder(self, folder: str):
+        """
+        Remove a folder from the workspace (Composer "Remove from Workspace").
+        The files are not touched; documents opened from the folder stay open.
+        """
+        folder = workspaceFolders.normalise(folder)
+        open_documents = [window for window in self.open_windows.values()
+                          if getattr(window, 'file_path', None)
+                          and workspaceFolders.containingFolder(window.file_path) == folder]
+        if open_documents:
+            reply = QMessageBox.question(
+                self,
+                "Remove from Workspace",
+                f"{len(open_documents)} open document(s) are in {folder}. Files outside the "
+                "workspace cannot be saved.\n\nRemove the folder from the workspace anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        if workspaceFolders.removeFolder(folder):
+            self.updateWorkspaceViews()
+            self.statusBar().showMessage(f"Removed {folder} from the workspace", 5000)
+
+    def onCurrentWorkspaceFolderChanged(self, folder: str):
+        """The user works in another workspace folder: new files go there."""
+        if workspaceFolders.setCurrentFolder(folder):
+            self._updateWorkspaceStatus()

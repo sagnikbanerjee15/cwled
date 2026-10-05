@@ -16,6 +16,7 @@ import json
 from ruamel.yaml import YAML
 import builtins
 import data
+import theme
 import logging
 import sys
 import subprocess
@@ -47,6 +48,7 @@ from BaseDialog import BaseDialog
 import uuid
 import shutil
 import hashlib
+logger = logging.getLogger(__name__)
 
 # Global watchdog observer shared across windows to ensure all handlers
 # receive the same events even when watching the same directories/files.
@@ -457,6 +459,9 @@ class ChildWindow(QDialog):
 
     def _constrain_geometry_to_screen(self, post_show: bool = False) -> None:
         """Clamp size and position to the target screen available geometry."""
+        if not self.isWindow():
+            # Embedded as a document tab of the main window
+            return
         available = self._get_target_screen_geometry()
         if available is None:
             return
@@ -813,9 +818,9 @@ class ChildWindow(QDialog):
 
     def _addToolbarAction(self, text: str, tooltip: str, handler, icon_key: str, fallback_key: str = None) -> QAction:
         """Create and add a toolbar action."""
-        icons = data.configuration.get('icons', {}) if data.configuration else {}
-        icon_path = icons.get(icon_key) or (icons.get(fallback_key) if fallback_key else None)
-        icon = QIcon(icon_path) if icon_path else QIcon()
+        icon = theme.icon(icon_key, color=theme.TEXT)
+        if icon.isNull() and fallback_key:
+            icon = theme.icon(fallback_key, color=theme.TEXT)
         action = QAction(icon, text, self)
         action.setToolTip(tooltip)
         action.triggered.connect(handler)
@@ -826,7 +831,7 @@ class ChildWindow(QDialog):
         """Create and configure the top toolbar for common document actions."""
         self.toolbar = QToolBar("Document toolbar", self)
         self.toolbar.setMovable(False)
-        self.toolbar.setIconSize(QSize(20, 20))
+        self.toolbar.setIconSize(QSize(16, 16))
 
         self.toolbar_save_action = self._addToolbarAction(
             text="Save",
@@ -853,7 +858,7 @@ class ChildWindow(QDialog):
             text="Validate",
             tooltip="Validate tool/workflow",
             handler=self.onMenuValidate,
-            icon_key='programming',
+            icon_key='check-circle-o',
             fallback_key='programming'
         )
 
@@ -1682,6 +1687,15 @@ class ChildWindow(QDialog):
                 serialized = serialized.decode('utf-8', errors='replace')
 
             payload = json.loads(serialized) if isinstance(serialized, str) else serialized
+            if isinstance(payload, dict):
+                # equivalent forms are the same document: "echo" / ["echo"],
+                # an empty list / no list at all
+                payload = dict(payload)
+                if isinstance(payload.get('baseCommand'), str):
+                    payload['baseCommand'] = [payload['baseCommand']]
+                for key in ('baseCommand', 'arguments', 'requirements', 'hints'):
+                    if payload.get(key) in ([], None):
+                        payload.pop(key, None)
             return json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
         except Exception as e:
             self.logger.debug(f"Fingerprint serialization fallback used due to: {e}")
@@ -2024,7 +2038,7 @@ class ChildWindow(QDialog):
                 fp=self.onMenuUpgradeVersion()
 
                 
-                print(f"\u23F3 Loading upgraded CWL from file: {str(fp)}")
+                logger.debug(f"\u23F3 Loading upgraded CWL from file: {str(fp)}")
                 self.file_path=str(fp)
                 self.loadCWL()
                 return
@@ -2132,22 +2146,25 @@ class ChildWindow(QDialog):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Create top toolbar for common actions.
-        self._setupToolbar()
-        main_layout.addWidget(self.toolbar)
-        
-        # Create tab widget for content
+        # Create tab widget for content. Like Composer's editor action bar,
+        # the tabs sit on the left and the document actions on the right.
         self.tabs = QTabWidget()
+        self.tabs.setObjectName('editorTabs')
+        self.tabs.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         main_layout.addWidget(self.tabs)
         self.tabs.setTabPosition(QTabWidget.TabPosition.North)
         self.tabs.setMovable(False)
+
+        # Create toolbar for common actions.
+        self._setupToolbar()
+        self.tabs.setCornerWidget(self.toolbar, Qt.Corner.TopRightCorner)
         
         # Create status bar area at the bottom, initially hidden
         self.command_line = None
         
         # Create and add info window for all CWL types
         self.info_window = InfoWindow(cwl_tool=self.cwl_tool, parent=self)
-        self.tabs.addTab(self.info_window, 'Info')
+        self.tabs.addTab(self.info_window, 'App Info')
         
         # Create and add code editor for all CWL types
         self.code_editor = CodeWindow(cwl_tool=self.cwl_tool, parent=self)
@@ -2220,12 +2237,8 @@ class ChildWindow(QDialog):
         has_workflow_tab = False
         
         # Check for existing tabs
-        for i in range(self.tabs.count()):
-            tab_text = self.tabs.tabText(i)
-            if tab_text == 'App':
-                has_app_tab = True
-            elif tab_text == 'Workflow':
-                has_workflow_tab = True
+        has_app_tab = hasattr(self, 'app_editor') and self.tabs.indexOf(self.app_editor) >= 0
+        has_workflow_tab = hasattr(self, 'workflow_editor') and self.tabs.indexOf(self.workflow_editor) >= 0
                 
         # Make command line visible or hidden based on CWL type
         if hasattr(self, 'command_line') and self.command_line:
@@ -2240,25 +2253,23 @@ class ChildWindow(QDialog):
         if self.cwl_type in ['CommandLineTool', 'ExpressionTool']:
             # Remove workflow tab if it exists
             if has_workflow_tab:
-                for i in range(self.tabs.count()):
-                    if self.tabs.tabText(i) == 'Workflow':
-                        self.tabs.removeTab(i)
-                        if hasattr(self, 'workflow_editor'):
-                            self.workflow_editor.deleteLater()
-                            delattr(self, 'workflow_editor')
-                        if hasattr(self, 'workflow_summary'):
-                            self.workflow_summary.deleteLater()
-                            delattr(self, 'workflow_summary')
-                        break
+                self.tabs.removeTab(self.tabs.indexOf(self.workflow_editor))
+                self.workflow_editor.deleteLater()
+                delattr(self, 'workflow_editor')
+                if hasattr(self, 'workflow_summary'):
+                    if self.tabs.indexOf(self.workflow_summary) >= 0:
+                        self.tabs.removeTab(self.tabs.indexOf(self.workflow_summary))
+                    self.workflow_summary.deleteLater()
+                    delattr(self, 'workflow_summary')
             
             # Add app tab if it doesn't exist
             if not has_app_tab:
                 self.app_editor = ToolEditor(cwl_tool=self.cwl_tool, parent=self)
-                self.tabs.insertTab(2, self.app_editor, 'App')  # Insert before the Code tab
+                self.tabs.insertTab(1, self.app_editor, 'Visual Editor')  # Insert before the Code tab
                 
                 self.app_editor.codeUpdated.connect(self.onUpdateCWL)
-                # For CommandLineTool and ExpressionTool, switch to the App tab
-                self.tabs.setCurrentIndex(2)
+                # For CommandLineTool and ExpressionTool, switch to the visual editor
+                self.tabs.setCurrentWidget(self.app_editor)
             
             # Add command line status bar for CommandLineTool if not exists
             if self.cwl_type == 'CommandLineTool' and not self.command_line:
@@ -2277,19 +2288,14 @@ class ChildWindow(QDialog):
         elif self.cwl_type == 'Workflow':
             # Remove app tab if it exists
             if has_app_tab:
-                for i in range(self.tabs.count()):
-                    if self.tabs.tabText(i) == 'App':
-                        self.tabs.removeTab(i)
-                        if hasattr(self, 'app_editor'):
-                            self.app_editor.deleteLater()
-                            delattr(self, 'app_editor')
-                        
-                        break
+                self.tabs.removeTab(self.tabs.indexOf(self.app_editor))
+                self.app_editor.deleteLater()
+                delattr(self, 'app_editor')
             
             # Add workflow tab if it doesn't exist
             if not has_workflow_tab:
                 self.workflow_editor = WorkflowEditor(cwl_workflow=self.cwl_tool, parent=self, file_location=self.file_path)
-                self.tabs.insertTab(2, self.workflow_editor, 'Workflow')  # Insert before the Code tab
+                self.tabs.insertTab(1, self.workflow_editor, 'Visual Editor')  # Insert before the Code tab
                 self.workflow_editor.codeUpdated.connect(self.onUpdateCWL)
 
                 self.workflow_summary= WorkflowSummary(
@@ -2297,11 +2303,10 @@ class ChildWindow(QDialog):
                     parent=self,
                     file_location=self.file_path
                 )
-                self.tabs.insertTab(3, self.workflow_summary, 'Summary')  # Insert before the Code tab
-                # Automatically switch to the workflow tab when a workflow is opened/created
-                workflow_tab_index = 3
-                self.tabs.setCurrentIndex(workflow_tab_index)
-                self.logger.debug("Automatically switched to the Workflow Summary tab")
+                self.tabs.insertTab(2, self.workflow_summary, 'Summary')  # Insert before the Code tab
+                # A workflow opens on its Visual Editor (the graph), like a tool
+                self.tabs.setCurrentWidget(self.workflow_editor)
+                self.logger.debug("Automatically switched to the Workflow Visual Editor tab")
              
 
     def closeEvent(self, event):

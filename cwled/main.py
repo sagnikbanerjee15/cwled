@@ -1,5 +1,4 @@
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt
 import sys
 import logging
@@ -9,14 +8,15 @@ import subprocess
 import colorlog
 import os
 from pathlib import Path
-import platform
 from configuration import Configuration
 from MainWindow import MainWindow
 import data
+import workspaceFolders
 import logger
 from logger import pinThirdPartyLoggers
 from CWLtoolFactory import CWLRunner
 from helperFunctions import getResourcePath
+import theme
 # setup the logging root.
 # all subsequent loggers will be children of this.
 logger=colorlog.getLogger('main')
@@ -56,8 +56,8 @@ def parseArgs():
     parser.add_argument('--input-file', 
                         dest='input_file', 
                         type=str,nargs="+", 
-                        help='Path(s) to the input file(s). For multiple inputs, separate them with a space.' + 
-                             'These paths should be under the workspace directory.')
+                        help='Path(s) to the input file(s). For multiple inputs, separate them with a space. ' + 
+                             'These paths should be under a workspace folder.')
     parser.add_argument('--new-workflow', 
                         dest='new_workflow', 
                         type=str, 
@@ -78,7 +78,8 @@ def parseArgs():
                         type=str, 
                         dest="workspace" , 
                         help='Default location for the CWL tools and workflows collection. '+
-                             'Tools and workflows cannot be accessed outside this directory.')
+                             'It is the first workspace folder, followed by the folders added to the workspace. '+
+                             'Tools and workflows cannot be accessed outside the workspace folders.')
     parser.add_argument('--version', 
                         action='store_true', 
                         help='Show the version of the tool and exit.')
@@ -91,25 +92,6 @@ def parseArgs():
     # Parse the arguments
     args = parser.parse_args()
     return args 
-
-
-def getOStyle():
-    """
-    Detect the operating system and return appropriate Qt style.
-    
-    Returns:
-        str: Qt style name appropriate for the OS
-    """
-    system = platform.system().lower()
-    
-    if system == 'darwin':  # macOS
-        return 'macOS'
-    elif system == 'windows':
-        return 'Windows'
-    elif system == 'linux':
-        return 'Fusion'  # Linux works well with Fusion
-    else:
-        return 'Fusion'  # Default fallback
 
 
 def main():
@@ -156,26 +138,23 @@ def main():
     pinThirdPartyLoggers()
 
     # setup the fonts for the application
+    # Composer uses the system UI font (San Francisco on macOS); a font family
+    # other than the shipped default in the configuration still takes precedence.
     font_family = data.configuration.get('main_window').get('font_family')
-    font = QFont()
-    font.setFamilies([font_family, "Helvetica Neue", "Ubuntu", "DejaVu Sans", "Liberation Sans", "Arial", "sans-serif"])
-    font.setPointSize(int(data.configuration.get('main_window').get('font_size')))
-    app.setFont(font)
+    app.setFont(theme.uiFont(font_family, int(data.configuration.get('main_window').get('font_size'))))
     
-    # Set a proper style that works well with Qt6
-    app.setStyle(getOStyle())  # or try 'Windows' on Windows, 'macOS' on macOS, "Fusion" on Linux
+    # Rabix Composer look and feel (dark theme, Fusion based so it is identical on every OS)
+    theme.applyTheme(app)
 
 
-    # Handle workspace directory
-    # try to get it from the configuration file first
-    workspace_path = Path.cwd()
-    if data.configuration.get('workspace'):
-        workspace_path = Path(data.configuration['workspace'])
-    # but override it if provided as a command line argument
+    # Handle the workspace folders: the folder given on the command line comes
+    # first, followed by the folders of the configuration (the single
+    # `workspace` setting and the saved `workspace_folders`); without any of
+    # them the current directory is used.
+    workspace_path = None
     if args.workspace:
         # Convert to Path object for easier handling
         workspace_path = Path(args.workspace)
-    if 'workspace_path' in locals():
         # Check if workspace directory exists and create it if not
         if not workspace_path.exists():
             logger.info(f"\u23F3 Creating workspace directory: {workspace_path}")
@@ -184,12 +163,8 @@ def main():
                 logger.info(f"\u2705 Created workspace directory: {workspace_path}")
             except Exception as e:
                 logger.error(f"\u274C Failed to create workspace directory: {e}")
-        
-        # Store the workspace path in data module to make it available application-wide
-        data.workspace_directory = str(workspace_path.absolute())
-        logger.info(f"\u2139 Using workspace directory: {data.workspace_directory}")
-    # Set default workspace to user's home directory if not specified    
-    data.workspace_directory = Path(workspace_path).resolve()
+    # Store the workspace folders in the data module to make them available application-wide
+    workspaceFolders.initialise(workspace_path)
     
     logger.info(f"\u2139 Changing working directory to workspace: {data.workspace_directory}")
 
