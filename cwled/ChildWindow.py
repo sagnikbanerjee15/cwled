@@ -706,7 +706,7 @@ class ChildWindow(QDialog):
                 return
 
         # Commit should always use latest on-disk content.
-        if self.hasChanged:
+        if self.isModified():
             self.onMenuSaveFile(str(self.file_path), self.file_format)
             if self.hasChanged:
                 QMessageBox.warning(
@@ -796,7 +796,7 @@ class ChildWindow(QDialog):
     def onToolbarGitPull(self):
         """Pull updates for the current branch from its default remote."""
         # Save before pull to avoid losing unsaved editor changes.
-        if self.hasChanged and self.file_path:
+        if self.isModified() and self.file_path:
             self.onMenuSaveFile(str(self.file_path), self.file_format)
             if self.hasChanged:
                 QMessageBox.warning(
@@ -1513,6 +1513,9 @@ class ChildWindow(QDialog):
         if not filename and not self.file_path:
             self.logger.warning(f"\u26A0 It was requested to store a file, but no name was provided.")
             return None
+        # what was typed in the Code tab is part of the document that is saved
+        if not self.applyPendingCodeEdits():
+            return None
         if filename:
             self.file_path = filename
 
@@ -1725,6 +1728,56 @@ class ChildWindow(QDialog):
         self._saved_fingerprint = self._compute_cwl_fingerprint()
         self.hasChanged = False
 
+    def _code_has_unapplied_changes(self) -> bool:
+        """Text typed in the Code tab is applied to the document when the tab is left: until then it is a change that is not in the document."""
+        code_editor = getattr(self, 'code_editor', None)
+        return bool(code_editor is not None and code_editor.hasUnappliedChanges())
+
+    def onCodeEdited(self):
+        """Something was typed in the Code tab: the document has changed, even if that is not applied yet."""
+        unapplied = self._code_has_unapplied_changes()
+        if unapplied and not self.hasChanged:
+            self.hasChanged = True
+            self.updateWindowTitle()
+        elif not unapplied and self.hasChanged:
+            # back to the applied text: the document may be the saved one again
+            if self._refresh_dirty_state():
+                self.updateWindowTitle()
+
+    def applyPendingCodeEdits(self) -> bool:
+        """
+        Apply the text typed in the Code tab that is not applied yet (before saving, which saves the
+        document, not the text). Returns False if the text cannot be applied (it is not valid CWL):
+        the reason was shown to the user and the document is left as it was.
+        """
+        if not self._code_has_unapplied_changes():
+            return True
+        try:
+            self.code_editor.applyEditorChanges(emit_signal=False)
+            self.onUpdateCWL("CWL editor updated")
+            return True
+        except Exception as e:
+            self.logger.warning(f"The text of the Code tab cannot be applied: {e}")
+            return False
+
+    def onDocumentEdited(self):
+        """
+        An editor changed the document in place (the workflow graph does): show it
+        at once, in the titles and the tab, without drawing all the tabs again.
+        """
+        if self._refresh_dirty_state():
+            self.updateWindowTitle()
+
+    def isModified(self) -> bool:
+        """
+        Whether the document has changes that are not saved. The state is worked out
+        from the document now, because an editor may have changed it since the last
+        time the state was refreshed.
+        """
+        if self._refresh_dirty_state():
+            self.updateWindowTitle()
+        return bool(self.hasChanged)
+
     def _refresh_dirty_state(self) -> bool:
         """Refresh dirty state from fingerprint comparison; return whether state toggled."""
         previous = bool(self.hasChanged)
@@ -1734,7 +1787,7 @@ class ChildWindow(QDialog):
             self._saved_fingerprint = current
             self.hasChanged = False
         else:
-            self.hasChanged = (current != self._saved_fingerprint)
+            self.hasChanged = (current != self._saved_fingerprint) or self._code_has_unapplied_changes()
 
         return previous != self.hasChanged
 
@@ -2180,6 +2233,7 @@ class ChildWindow(QDialog):
         
         # Connect the codeUpdated signal from the code editor to onUpdateCWL
         self.code_editor.codeUpdated.connect(self.onUpdateCWL)
+        self.code_editor.edited.connect(self.onCodeEdited)
         
         self.info_window.codeUpdated.connect(self.onUpdateCWL)
         
@@ -2305,6 +2359,7 @@ class ChildWindow(QDialog):
                 self.workflow_editor = WorkflowEditor(cwl_workflow=self.cwl_tool, parent=self, file_location=self.file_path)
                 self.tabs.insertTab(1, self.workflow_editor, 'Visual Editor')  # Insert before the Code tab
                 self.workflow_editor.codeUpdated.connect(self.onUpdateCWL)
+                self.workflow_editor.modified.connect(self.onDocumentEdited)
 
                 self.workflow_summary= WorkflowSummary(
                     cwl_workflow=self.cwl_tool, 
@@ -2342,7 +2397,7 @@ class ChildWindow(QDialog):
             pass
 
         # Prompt to save if there are unsaved changes
-        if self.hasChanged:
+        if self.isModified():
             reply = self.questionCentered(
                 title="Save Changes?",
                 text="You have unsaved changes. Do you want to save before closing?",
@@ -2352,6 +2407,10 @@ class ChildWindow(QDialog):
                 event.ignore()
                 return
             elif reply == QMessageBox.StandardButton.Yes:
+                if not self.applyPendingCodeEdits():
+                    # the text of the Code tab is not valid: it would be lost, so the window stays
+                    event.ignore()
+                    return
                 self.onMenuSaveFile()
 
         # Emit signal to the main window with this window's ID

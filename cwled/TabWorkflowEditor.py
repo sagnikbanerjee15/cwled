@@ -30,6 +30,7 @@ class WorkflowEditor(QWidget):
     cwl_workflow: Any = None # the main object representing the workflow
     updateSignal = pyqtSignal(str)
     codeUpdated = pyqtSignal(str)  # Signal emitted when the workflow is updated    
+    modified = pyqtSignal()  # the graph changed the document in place (see onGraphChanged)
     tabActivated = pyqtSignal()      # Emitted when this tab becomes current
     tabDeactivated = pyqtSignal()    # Emitted when this tab stops being current
     tab_signal_connected = False # Remember if the singla is connected
@@ -893,6 +894,7 @@ class WorkflowEditor(QWidget):
 
         #     # Display information to the user
         #     self.logger.debug(f"Created new step node: {new_step_id} referencing {cwl_file}")
+            self.modified.emit()
             self.logger.info(f"\u2705 Successfully added step node from {cwl_file}")
         except Exception as e:
             self.logger.error(f"Error creating step node from {cwl_file}: {str(e)} =>\n{traceback.format_exc()}")
@@ -968,6 +970,7 @@ class WorkflowEditor(QWidget):
             except Exception as e:
                 self.logger.warning(f"Error arranging inputs/outputs after duplicating step: {str(e)}")
 
+            self.modified.emit()
             self.logger.info(f"\u2705 Successfully duplicated step '{original_step.id}' as '{new_step_id}'")
         except Exception as e:
             self.logger.error(f"Error duplicating step: {str(e)} =>\n{traceback.format_exc()}")
@@ -1069,6 +1072,9 @@ class WorkflowEditor(QWidget):
         if self.findScatter():
             self.addRequirementIfMissing('ScatterFeatureRequirement')
         # self.codeUpdated.emit("CWL workflow updated")
+        # The document is the same object as the one of the ChildWindow, so it has changed already.
+        # Tell the window so that it can show it (the "*" in the titles) without drawing all the tabs again.
+        self.modified.emit()
 
  
     def getCWL(self):

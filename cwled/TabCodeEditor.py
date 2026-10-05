@@ -26,6 +26,7 @@ class CodeWindow( QWidget):
     '''
     format="YAML" # the default format to present the code
     codeUpdated = pyqtSignal(str) # Signal emitted when code is updated via the Update button, passes a message
+    edited = pyqtSignal()  # the user typed in the editor (the text is applied when the tab is left)
     title:str=None
     cwl_tool:Any =None
     cwl_version:str=None
@@ -50,6 +51,7 @@ class CodeWindow( QWidget):
         self.logger.setLevel(data.configuration.get('logLevel',{}).get(self.__class__.__name__, 'DEBUG'))
         self.title=title
         self._last_applied_text = ""
+        self._loading = False   # the editor is being filled from the document, which is not an edit
         # set the dictionary that holds the CWL code
         self.setCWLTool(cwl_tool)
         
@@ -67,6 +69,7 @@ class CodeWindow( QWidget):
         """
         self.editor=QsciScintilla()
         self.editor.setWindowTitle(self.title)
+        self.editor.textChanged.connect(self._onEditorTextChanged)
         # Customize the editor appearance
         self.editor.setMarginsFont(theme.monospaceFont(12))
         self.editor.setMarginWidth(0, 50)  # Line numbers margin width
@@ -297,6 +300,10 @@ class CodeWindow( QWidget):
         self.replace_dialog.show()
         self.replace_dialog.raise_()
         self.replace_dialog.activateWindow()
+
+    def _onEditorTextChanged(self):
+        if not self._loading:
+            self.edited.emit()
 
     def _markTextAsApplied(self, text: str) -> None:
         """Store the latest editor text known to be applied to the CWL model."""
@@ -550,7 +557,11 @@ class CodeWindow( QWidget):
             # Save scroll and cursor position before replacing text
             first_visible = self.editor.SendScintilla(self.editor.SCI_GETFIRSTVISIBLELINE)
             cursor_line, cursor_index = self.editor.getCursorPosition()
-            self.editor.setText( text )
+            self._loading = True
+            try:
+                self.editor.setText( text )
+            finally:
+                self._loading = False
             # Restore cursor and scroll position
             max_line = self.editor.lines() - 1
             cursor_line = min(cursor_line, max_line)
