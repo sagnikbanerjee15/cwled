@@ -30,21 +30,8 @@ class Tag(QWidget):
 
         # Set layout and appearance
         self.setLayout(layout)
-        # Composer tag: blue pill with white text
+        # Composer tag: blue pill with white text (theme.STYLE_SHEET, "Tag")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet(f"""
-            Tag {{
-                background-color: {theme.BLUE};
-                border: 1px solid {theme.BTN_PRIMARY_BORDER};
-                border-radius: 2px;
-            }}
-            QLabel {{ color: {theme.WHITE}; background: transparent; border: none; padding: 2px; }}
-            QPushButton {{
-                border: none; background: transparent; color: {theme.WHITE};
-                font-weight: bold; padding: 0;
-            }}
-            QPushButton:hover {{ color: {theme.SMOKE}; background-color: {theme.BTN_PRIMARY_BORDER}; }}
-        """)
 
     def remove_self(self):
         # Remove this tag from the parent widget (the tag list)

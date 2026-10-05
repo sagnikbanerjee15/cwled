@@ -440,6 +440,7 @@ class CommandLine(QWidget):
             'stdin': theme.CODE_STREAM, 'stdout': theme.CODE_STREAM,
             'error': theme.CODE_ERROR, 'warning': theme.CODE_WARNING,
         }
+        self._last_render = (parts, results)
         self.command_display.clear()
         self.command_display.setExtraSelections([])
         self._ranges = []
@@ -466,6 +467,11 @@ class CommandLine(QWidget):
             placeholder = QTextCharFormat()
             placeholder.setForeground(QColor(theme.TEXT_MUTED))
             cursor.insertText("Your command line preview will appear here", placeholder)
+
+    def onThemeChanged(self):
+        last = getattr(self, '_last_render', None)
+        if last is not None:
+            self._render(*last)
 
     def updateCommandLine(self):
         """

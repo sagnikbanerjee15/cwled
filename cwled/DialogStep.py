@@ -95,7 +95,7 @@ class InputRowWidget(QWidget):
         
         # Add info icon next to id_label
         self.info_icon = QLabel()
-        self.info_icon.setPixmap(theme.icon('info').pixmap(QSize(16, 16), self.devicePixelRatioF()))
+        theme.setLabelIcon(self.info_icon, theme.icon('info'), 16)
         
         # Set tooltip based on cwl_step.doc value
         if hasattr(self.cwl_step, 'doc') and self.cwl_step.doc:

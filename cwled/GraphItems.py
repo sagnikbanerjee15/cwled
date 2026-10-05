@@ -13,7 +13,7 @@ import weakref
 from PyQt6 import sip
 from PyQt6.QtCore import QByteArray, QEvent, QObject, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import (QBrush, QColor, QFont, QFontMetricsF, QPainter,
-                         QPainterPath, QPainterPathStroker, QPen)
+                         QPainterPath, QPainterPathStroker, QPen, QPolygonF)
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (QApplication, QGraphicsItem, QHBoxLayout,
                              QPushButton, QWidget)
@@ -79,7 +79,7 @@ _ICONS = {
 }
 _renderers = {}
 # the marks of the steps that differ in a comparison: added, removed, changed
-DIFF_COLORS = {'added': theme.GREEN, 'removed': theme.RED, 'changed': theme.CARROT}
+DIFF_COLORS = {'added': 'GREEN', 'removed': 'RED', 'changed': 'CARROT'}   # theme roles
 
 
 def _color(key):
@@ -484,7 +484,7 @@ class CWLNodeItem(NodeItem):
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         if self._diff:
             # a halo in the colour of the difference, around the ring
-            halo = QPen(QColor(DIFF_COLORS[self._diff]), 3)
+            halo = QPen(QColor(getattr(theme, DIFF_COLORS[self._diff])), 3)
             halo.setStyle(Qt.PenStyle.DashLine if self._diff == 'removed' else Qt.PenStyle.SolidLine)
             painter.setPen(halo)
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -672,11 +672,39 @@ def _hideIndexPointer(original):
     return draw_index_pointer
 
 
+DOT_SPACING = 24                # canvas dot grid (themes with GRAPH_GRID "dots")
+
+
+def _drawDots(self, painter, rect, pen, grid_size):
+    """
+    Dot grid of the canvas, round dots of a constant size on screen.
+    (OdenGraphQt's own passes a float to QPen.setWidth and fails with PyQt6.)
+    """
+    viewer = self.viewer()
+    scale = viewScale(viewer) if viewer is not None else 1.0
+    spacing = DOT_SPACING
+    while spacing * scale < 14:             # keep the dots apart when zoomed out
+        spacing *= 2
+    left = math.floor(rect.left() / spacing) * spacing
+    top = math.floor(rect.top() / spacing) * spacing
+    points = [QPointF(x, y)
+              for x in range(int(left), int(rect.right()) + spacing, spacing)
+              for y in range(int(top), int(rect.bottom()) + spacing, spacing)]
+    dot = QPen(pen.color(), 2.2)
+    dot.setCosmetic(True)
+    dot.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(dot)
+    painter.drawPoints(QPolygonF(points))
+
+
 def patchPipes():
-    """Draw every graph connection as a cwl-svg edge."""
+    """Draw every graph connection as a cwl-svg edge (and the canvas dot grid)."""
     if getattr(PipeItem, '_cwled_composer', False):
         return
     PipeItem._cwled_composer = True
+    from OdenGraphQt.widgets.scene import NodeScene
+    NodeScene._draw_dots = _drawDots
     PipeItem.__init__ = _pipeInit(PipeItem.__init__)
     PipeItem.set_pipe_styling = _setPipeStyling
     PipeItem.shape = _pipeShape
@@ -1005,6 +1033,56 @@ class CanvasNavigator(QObject):
         else:
             return False
         return True
+
+
+def gridMode():
+    """The canvas grid of the theme (cwl-svg draws none)."""
+    from OdenGraphQt.constants import ViewerEnum
+    if theme.GRAPH_GRID == 'dots':
+        return ViewerEnum.GRID_DISPLAY_DOTS.value
+    return ViewerEnum.GRID_DISPLAY_NONE.value
+
+
+def themeChanged():
+    """Forget what was drawn in the colours of the previous theme."""
+    _renderers.clear()
+
+
+# what keeps a graph colour: nodes, ports and edges
+_NODE_FILLS = ('step', 'step_conditional', 'io', 'io_optional')
+_PORT_FILLS = ('port', 'io_optional')
+
+
+def retheme(graph):
+    """Redraw a graph in the colours of the current theme."""
+    previous = theme.PREVIOUS_GRAPH
+
+    def remap(colour, keys):
+        for key in keys:
+            if previous.get(key) and tuple(previous[key][:3]) == tuple(colour[:3]):
+                return tuple(theme.GRAPH[key][:3]) + (255,)
+        return None
+
+    graph.set_background_color(*theme.GRAPH['background'][:3])
+    graph.set_grid_color(*theme.GRAPH['grid'][:3])
+    graph.set_grid_mode(gridMode())
+    for node in graph.all_nodes():
+        fill = remap(node.color(), _NODE_FILLS)
+        if fill is not None:
+            node.set_property('color', fill, push_undo=False)
+        for port in list(node.inputs().values()) + list(node.outputs().values()):
+            colour = remap(port.color, _PORT_FILLS)
+            if colour is not None:
+                port.color = colour
+    for pipe in graph.viewer().all_pipes():
+        pipe._color = theme.GRAPH['edge']
+    scene = graph.viewer().scene()
+    if not _gone(scene):
+        # items keep a cached picture of themselves: redraw every one
+        for item in scene.items():
+            item.update()
+        scene.update()
+    graph.viewer().viewport().update()
 
 
 def install(graph):

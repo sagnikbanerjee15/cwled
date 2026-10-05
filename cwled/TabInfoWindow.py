@@ -520,12 +520,7 @@ class InfoWindow(QWidget):
 
         # Composer status-bar look for the file information ribbon
         self.file_info_ribbon.setObjectName('fileInfoRibbon')
-        self.file_info_ribbon.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.file_info_ribbon.setStyleSheet(
-            f"QWidget#fileInfoRibbon {{ background-color: {theme.STATUS_BAR_BG}; "
-            f"border-top: 1px solid {theme.BLACK}; }} "
-            f"QWidget#fileInfoRibbon QLabel {{ color: {theme.TEXT_MUTED}; padding: 3px 8px; }}"
-        )
+        self.file_info_ribbon.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)   # theme.STYLE_SHEET
 
         # Main layout of the window
         main_layout = QVBoxLayout(self)

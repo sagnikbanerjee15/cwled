@@ -7,6 +7,7 @@ import json
 from copy import deepcopy
 from widgets.qLabelLineEditWidget import QLabelLineEditWidget
 from configuration import Configuration
+import theme
 
 class ConfigDialog(QDialog):
     """
@@ -89,6 +90,20 @@ class ConfigDialog(QDialog):
         default_cwl_version_layout.addWidget(self.default_cwl_version)
         layout.addLayout(default_cwl_version_layout)
         
+        # Theme (applied at once when the dialog is accepted)
+        theme_layout = QHBoxLayout()
+        theme_label = QLabel("Theme")
+        theme_label.setFixedWidth(150)
+        self.theme_combo = QComboBox()
+        for name in theme.themeNames():
+            self.theme_combo.addItem(name)
+            self.theme_combo.setItemData(self.theme_combo.count() - 1, theme.THEMES[name]['description'],
+                                         Qt.ItemDataRole.ToolTipRole)
+        self.theme_combo.setCurrentText(theme.currentTheme())
+        theme_layout.addWidget(theme_label)
+        theme_layout.addWidget(self.theme_combo)
+        layout.addLayout(theme_layout)
+
         # Reopen the last session
         self.restore_session_check = QCheckBox("Reopen the documents and windows of the last session at start")
         self.restore_session_check.setChecked(bool(self.config.get('restore_session', True)))
@@ -613,6 +628,8 @@ class ConfigDialog(QDialog):
             self.config['default_cwl_version'] = self.default_cwl_version.currentText()
         
         self.config['restore_session'] = self.restore_session_check.isChecked()
+        self.config['theme'] = self.theme_combo.currentText()
+        
         # Make sure main_window dictionary exists
         if 'main_window' not in self.config:
             self.config['main_window'] = {}
@@ -698,6 +715,8 @@ class ConfigDialog(QDialog):
         # Update the global configuration
         data.configuration.clear()
         data.configuration.update(self.config)
+        if self.config['theme'] != theme.currentTheme():
+            theme.setTheme(self.config['theme'], save=False)    # saved below with the rest
         
         # Save configuration to file if needed
         try:

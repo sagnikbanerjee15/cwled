@@ -361,7 +361,7 @@ class WorkspaceContents(QMainWindow):
         layout.setContentsMargins(16, 24, 16, 16)
         layout.setSpacing(10)
         icon_label = QLabel(empty_state)
-        icon_label.setPixmap(theme.icon('folder-open').pixmap(QSize(48, 48), self.devicePixelRatioF()))
+        theme.setLabelIcon(icon_label, theme.icon('folder-open'), 48)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(icon_label)
         message = QLabel("The workspace is empty.\n"

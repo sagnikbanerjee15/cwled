@@ -57,15 +57,23 @@ class QToggle(QCheckBox):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Composer toggle slider colours
-        self._bg_color, self._circle_color, self._active_color, \
-            self._disabled_color, self._text_color = QColor("#4a4a4a"), \
-            QColor(theme.SMOKE), QColor(theme.SKY), QColor(theme.GRAY), QColor(theme.TEXT)
+        self._themeColors()
         self._circle_pos, self._intermediate_bg_color = None, None
         self.setFixedHeight(18)
         self._animation_duration = 500  # milliseconds
         self.stateChanged.connect(self.start_transition)
         self._user_checked = False  # Introduced flag to check user-initiated changes
+
+    def _themeColors(self):
+        """Composer toggle slider colours, from the current theme."""
+        self._bg_color, self._circle_color, self._active_color, \
+            self._disabled_color, self._text_color = QColor(theme.LINE_SUBTLE), \
+            QColor(theme.SMOKE), QColor(theme.SKY), QColor(theme.GRAY), QColor(theme.TEXT)
+
+    def onThemeChanged(self):
+        self._themeColors()
+        self.update_pos_color(self.isChecked())
+        self.update()
 
     circle_pos = pyqtProperty(
         float, lambda self: self._circle_pos,

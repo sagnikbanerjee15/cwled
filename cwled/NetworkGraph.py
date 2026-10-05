@@ -144,11 +144,14 @@ class CWLGraph(QWidget):
         # cwl-svg "rabix-dark" canvas: plain dark background, no grid
         self.graph.set_background_color(*theme.GRAPH['background'])
         self.graph.set_grid_color(*theme.GRAPH['grid'])
-        self.graph.set_grid_mode(ViewerEnum.GRID_DISPLAY_NONE.value)
+        self.graph.set_grid_mode(GraphItems.gridMode())
         GraphItems.install(self.graph)
         self.graph_widget = self.graph.widget
         # Create the layout for the graph widget
         self.graph_layout = QVBoxLayout(self)
+        # the canvas runs edge to edge, as in Composer
+        self.graph_layout.setContentsMargins(0, 0, 0, 0)
+        viewer.setFrameShape(QFrame.Shape.NoFrame)
         self.graph_layout.addWidget(self.graph_widget)
         
         # Connect to the port_connected signal to be notified of new connections
@@ -170,6 +173,10 @@ class CWLGraph(QWidget):
             self.logger.debug("The canvas is empty")
 
         self.showGraph()
+
+    def onThemeChanged(self):
+        """Redraw the workflow in the colours of the new theme."""
+        GraphItems.retheme(self.graph)
 
     def editor(self):
         """The workflow editor holding the graph (its node coordinates), even

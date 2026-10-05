@@ -28,6 +28,7 @@ The architecture of CWLed is designed for flexibility, catering to both visual-o
   - [Comparing Documents](#comparing-documents)
   - [Welcome Tab](#welcome-tab)
   - [Status Bar](#status-bar)
+  - [Themes](#themes)
 - [Command Line tool Editor](#command-line-tool-editor)
   - [Document Toolbar](#document-toolbar)
   - [App Info Tab](#app-info-tab)
@@ -54,6 +55,7 @@ The architecture of CWLed is designed for flexibility, catering to both visual-o
 - [Menu Options](#menu-options)
   - [File Menu](#file-menu)
   - [Tools Menu](#tools-menu)
+  - [View Menu](#view-menu)
   - [Window Menu](#window-menu)
   - [Help Menu](#help-menu)
 - [Test Files Reference](#test-files-reference)
@@ -134,7 +136,7 @@ The side panel lists the CWL documents of your workspace. Use the *Workspace* an
 
 *Follow the open document*: The target button next to the eye button (on by default) selects the file of the document you are working on in the list, when you switch tabs and when a document is opened or saved with another name. It leaves alone the *Recent* list, a search in progress and any folder you hid, and it does not take the selection back from you while you edit.
 
-*Recent*: The files you opened most recently, newest first. Double-click an entry to open it.
+*Recent*: The files you opened most recently, newest first, each with the icon of its type (workflow, command line tool or expression tool) and its folder in grey. Double-click an entry to open it.
 
 You can also drag a CWL file from the Workspace tree (any of its folders) onto a workflow's Visual Editor to add it as a step (see [Visual Editor Tab](#visual-editor-tab-1)).
 
@@ -205,7 +207,21 @@ The Welcome tab is shown when CWLed starts. It contains:
 
 ## Status Bar
 
-The status bar shows the current workspace folder (and how many other folders the workspace has; hover it to see them all) on the left and the CWLed version on the right.
+The status bar shows the current workspace folder (and how many other folders the workspace has; hover it to see them all) on the left and, on the right, the brush button that switches the [theme](#themes) and the CWLed version.
+
+## Themes
+
+![The five themes](./themes.png)
+
+CWLed comes with five colour themes:
+
+- **Composer Dark** (the default): the dark theme of Rabix Composer.
+- **Light**: a bright theme with cool greys and blue accents.
+- **Midnight**: a deep blue dark theme with bright blue accents.
+- **Nord**: the Nord palette, arctic greys with frost blue accents.
+- **Solarized Light**: the light variant of Solarized, in warm paper tones.
+
+Choose one with **View > Theme**, the brush button in the status bar, or the *Theme* setting of the [configuration](#general-tab). The theme changes at once, without restarting: the windows, the code editors, the command line preview and the workflow graphs of the open documents are redrawn in the new colours, and the choice is remembered for the next start (the `theme` key of the configuration file). Each theme also has its own code editor colours and workflow graph colours; the themes other than Composer Dark have slightly rounder corners and a dotted grid on the workflow canvas.
 
 # Command Line tool Editor
 
@@ -476,6 +492,7 @@ The Configuration dialog allows you to customize various aspects of the applicat
 This tab contains basic application settings.
 *   **Application Name**: The name of the application as displayed in the title bar.
 *   **Default CWL Version**: Select the default CWL version to be used when creating new tools or workflows.
+*   **Theme**: The colour [theme](#themes) of the application. It is applied as soon as you press OK.
 *   **Reopen the documents and windows of the last session at start**: When on (the default) the documents that were open when you quit, the windows tabs were torn off into and their positions are restored at the next start.
 *   **Window Size**: Set the initial width and height of the main application window. The window is never opened larger than the screen.
 
@@ -553,6 +570,10 @@ The application provides four menus: **File**, **Tools**, **Window** and **Help*
 
 - **Troubleshoot tool/workflow**: Opens an LLM-assisted troubleshooting flow for the currently active CWL document. You provide an issue description, and the application returns guidance in a dedicated response dialog.
 
+
+## View Menu
+
+- **Theme**: Switches between the colour [themes](#themes); the current one is checked.
 
 ## Window Menu
 

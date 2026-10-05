@@ -603,9 +603,6 @@ class QInputWidget(QCWLedWidget):
             opt = is_optional(cwl_input)
             
             # Optional inputs are shown in the muted colour
-            font_style = ""
-            font_color = f"color: {theme.TEXT_MUTED};" if opt else f"color: {theme.TEXT};"
-            style_sheet = f"{font_style} {font_color}"
             self.type_label.setText(format_parameter_type(getattr(cwl_input, 'type_', None)))
             self.binding_label.setText(format_input_binding(getattr(cwl_input, 'inputBinding', None)))
             
@@ -632,8 +629,8 @@ class QInputWidget(QCWLedWidget):
                     "Input object must have either 'id' or 'name' attribute"
                 )
             # Apply style sheet to the ID and type fields
-            self.line_edit_type.setStyleSheet(style_sheet)
-            self.line_edit_ID.setStyleSheet(style_sheet)
+            theme.setMuted(self.line_edit_type, opt)
+            theme.setMuted(self.line_edit_ID, opt)
 
             # Handle record type fields differently than regular fields
             if 'record' in field_type:
@@ -664,7 +661,7 @@ class QInputWidget(QCWLedWidget):
                 self.line_edit_record_type.setText(record_type)
                 
                 # Apply the style sheet to the record type field
-                self.line_edit_record_type.setStyleSheet(style_sheet)
+                theme.setMuted(self.line_edit_record_type, opt)
             else:                # For non-record types, show standard fields
                 self.line_edit_record_type.hide()
                 self.line_edit_prefix.show()
@@ -718,14 +715,7 @@ class QInputWidget(QCWLedWidget):
                 self.record_fields_widget.editingFinished.connect(self._emit_editing_finished)
                 # Create a container with border for the record fields
                 container = QWidget()
-                container.setObjectName("recordFieldsContainer")
-                container.setStyleSheet(f"""
-                    QWidget#recordFieldsContainer {{
-                        border: 1px solid {theme.BLACK};
-                        border-radius: 2px;
-                        margin-top: 5px;
-                    }}
-                """)
+                container.setObjectName("recordFieldsContainer")    # styled in theme.STYLE_SHEET
                 
                 # Create a layout for the container
                 container_layout = QVBoxLayout(container)

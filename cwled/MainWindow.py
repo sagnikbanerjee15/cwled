@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QLabel, QPushButton, QWidget,QMessageBox,
     QToolButton, QFrame, QScrollArea, QSizePolicy
 )
-from PyQt6.QtGui import QAction, QIcon, QFont, QColor, QFontMetrics, QPixmap, QKeySequence, QGuiApplication
+from PyQt6.QtGui import QAction, QActionGroup, QIcon, QFont, QColor, QFontMetrics, QPixmap, QKeySequence, QGuiApplication
 from pathlib import Path, PurePath
 from CWLparser import Parser
 import json
@@ -105,6 +105,8 @@ class MainWindow(WorkbenchWindow):
         self._last_host=None       # the window that was last active
         self._recent_menus=[]      # the Recent menu of every window
         self._window_menus=[]      # the Window menu of every window
+        self._theme_menus=[]       # the View > Theme menu of every window
+        theme.notifier.themeChanged.connect(self._refreshThemeMenus)
         GraphItems.LINK.changed.connect(lambda _enabled: self.refreshWindowMenus())
         self.logger.info(f"Setting up {self.__class__.__name__}")
         self.logger.info(f"Logging level set to {logging.getLevelName(self.logger.level)}")
@@ -211,6 +213,20 @@ class MainWindow(WorkbenchWindow):
         self.welcome = self._buildWelcomePage()
         self.welcome.setProperty(DETACHABLE_PROPERTY, False)
         self.showWelcomeTab()
+
+        # themes, a click away (also in View > Theme)
+        theme_button = QToolButton(self)
+        theme_button.setObjectName('themeButton')
+        theme_button.setIcon(theme.icon('paint-brush'))
+        theme_button.setToolTip("Theme")
+        theme_button.setAutoRaise(True)
+        theme_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        theme_menu = QMenu("Theme", theme_button)
+        self._theme_menus.append(theme_menu)
+        self._fillThemeMenu(theme_menu)
+        theme_button.setMenu(theme_menu)
+        self.statusBar().addPermanentWidget(theme_button)
+
         version_status = QLabel(f"CWLed {version.__version__}")
         version_status.setProperty('muted', True)
         self.statusBar().addPermanentWidget(version_status)
@@ -382,7 +398,7 @@ class MainWindow(WorkbenchWindow):
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(6)
             icon_label = QLabel()
-            icon_label.setPixmap(theme.icon('folder').pixmap(QSize(14, 14), self.devicePixelRatioF()))
+            theme.setLabelIcon(icon_label, theme.icon('folder'), 14)
             row_layout.addWidget(icon_label)
             folder_label = QLabel(folder)
             folder_label.setProperty('muted', True)
@@ -944,6 +960,12 @@ class MainWindow(WorkbenchWindow):
         tools_menu.addSeparator()
         tools_menu.addAction( tools_troubleshoot)
         
+        view_menu=menu_bar.addMenu("&View")
+        theme_menu = QMenu("Theme", owner)
+        view_menu.addMenu(theme_menu)
+        self._theme_menus.append(theme_menu)
+        self._fillThemeMenu(theme_menu)
+
         window_menu=menu_bar.addMenu("&Window")
         self._window_menus.append(window_menu)
         self.refreshWindowMenus()
@@ -957,6 +979,33 @@ class MainWindow(WorkbenchWindow):
         if owner is self:
             self.file_menu, self.tools_menu, self.new_menu = file_menu, tools_menu, new_menu
             self.recent_menu, self.window_menu, self.help_menu = recent_menu, window_menu, help_menu
+
+    def _fillThemeMenu(self, menu:QMenu):
+        """One checkable entry per theme; the current one is checked."""
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        for name in theme.themeNames():
+            action = QAction(name, menu)
+            action.setCheckable(True)
+            action.setChecked(name == theme.currentTheme())
+            action.setToolTip(theme.THEMES[name]['description'])
+            action.setStatusTip(theme.THEMES[name]['description'])
+            action.setData(name)
+            action.triggered.connect(lambda _checked=False, name=name: self.onMenuTheme(name))
+            group.addAction(action)
+            menu.addAction(action)
+        menu.setToolTipsVisible(True)
+
+    def _refreshThemeMenus(self, current:str):
+        self._theme_menus = [menu for menu in self._theme_menus if not sip.isdeleted(menu)]
+        for menu in self._theme_menus:
+            for action in menu.actions():
+                action.setChecked(action.data() == current)
+
+    def onMenuTheme(self, name:str):
+        """Switch to another theme (View > Theme or the status bar brush)."""
+        applied = theme.setTheme(name)
+        self.statusBar().showMessage(f"Theme: {applied}", 3000)
 
     def refreshWindowMenus(self):
         """Rebuild the Window menu of every window: the main window and the open documents."""

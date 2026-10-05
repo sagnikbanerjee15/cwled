@@ -60,6 +60,29 @@ BTN_PRIMARY_BORDER = "#296394"
 TEXT = SMOKE                   # $text-color
 TEXT_MUTED = LIGHT_GRAY        # $text-muted
 TEXT_DISABLED = "#777777"
+ON_ACCENT = WHITE              # text and marks on BLUE / SKY (primary buttons, check marks)
+ICON_DISABLED = "#5f5f5f"
+LINE_SUBTLE = "#4a4a4a"        # indentation guides, disabled control borders
+ALT_BASE = "#383838"           # alternate rows
+BUTTON_HOVER = "#383838"
+BUTTON_PRESSED = "#262626"
+BTN_PRIMARY_HOVER = "#3a88c9"
+BTN_PRIMARY_PRESSED = "#2c6ca2"
+LINK_HOVER = "#9ac5f5"
+TOOL_PRESSED = "#343434"
+SIDEBAR_HOVER = "#363636"
+SIDEBAR_SELECTED_BG = DARK_GRAY  # $tree-node-selected-background
+HIGHLIGHT_INACTIVE = "#3a4558"
+TOOLTIP_BG = BLACK
+TOOLTIP_TEXT = SMOKE
+SCROLL_HANDLE = LIGHT_GRAY
+SCROLL_HANDLE_HOVER = SMOKE
+SHADOW = "#141414"
+PALETTE_MIDLIGHT = "#424242"
+PALETTE_MID = "#2a2a2a"
+TOGGLE_KNOB = SMOKE            # ct-toggle-slider knob
+TOGGLE_TRACK_OFF = INPUT_BG    # ct-toggle-slider track when off
+RADIUS = 2                     # $border-radius
 
 # Command line preview (Composer: command-line-preview.component.scss)
 CODE_BASE_CMD = PURPLE
@@ -109,6 +132,196 @@ GRAPH = {
     'faded_io': (131, 131, 131),
     'faded_label': (126, 125, 125),
 }
+GRAPH_GRID = "none"             # canvas grid: "none" (cwl-svg) or "dots"
+
+# ---------------------------------------------------------------------------
+# Themes
+# ---------------------------------------------------------------------------
+# Every theme gives a value to the same roles. The role names come from
+# Composer's palette and keep their meaning in light themes: BLACK is the
+# colour of borders and dark chrome, WHITE the strongest text, SMOKE the
+# text, LIGHT_GRAY the muted text, GRAY the panels and DARK_GRAY the body.
+THEME_ROLES = (
+    'BLACK', 'DARK_GRAY', 'GRAY', 'LIGHT_GRAY', 'SMOKE', 'WHITE', 'BLUE', 'SKY', 'ORANGE',
+    'CARROT', 'RED', 'PURPLE', 'GREEN', 'SUCCESS', 'BODY_BG', 'PANEL_BG', 'TITLE_BAR_BG',
+    'INPUT_BG', 'INPUT_BORDER', 'INPUT_BG_DISABLED', 'STATUS_BAR_BG', 'TERMINAL_BG',
+    'SELECTED_BG', 'HOVER_BORDER', 'BTN_PRIMARY_BORDER', 'TEXT', 'TEXT_MUTED', 'TEXT_DISABLED',
+    'ON_ACCENT', 'ICON_DISABLED', 'LINE_SUBTLE', 'ALT_BASE', 'BUTTON_HOVER', 'BUTTON_PRESSED',
+    'BTN_PRIMARY_HOVER', 'BTN_PRIMARY_PRESSED', 'LINK_HOVER', 'TOOL_PRESSED', 'SIDEBAR_HOVER',
+    'SIDEBAR_SELECTED_BG', 'HIGHLIGHT_INACTIVE', 'TOOLTIP_BG', 'TOOLTIP_TEXT', 'SCROLL_HANDLE',
+    'SCROLL_HANDLE_HOVER', 'SHADOW', 'PALETTE_MIDLIGHT', 'PALETTE_MID', 'TOGGLE_KNOB',
+    'TOGGLE_TRACK_OFF', 'RADIUS',
+    'CODE_BASE_CMD', 'CODE_INPUTS', 'CODE_ARGS', 'CODE_STREAM', 'CODE_WARNING', 'CODE_ERROR',
+    'GRAPH_GRID',
+)
+DEFAULT_THEME = "Composer Dark"
+
+
+def _theme(description: str, dark: bool, colors: dict, editor: dict, graph: dict) -> dict:
+    """A theme: the Composer Dark values with ``colors``/``editor``/``graph`` on top."""
+    base = THEMES[DEFAULT_THEME]
+    return {
+        'description': description,
+        'dark': dark,
+        'colors': {**base['colors'], **colors},
+        'editor': {**base['editor'], **editor},
+        'graph': {**base['graph'], **graph},
+    }
+
+
+THEMES = {
+    DEFAULT_THEME: {
+        'description': "Rabix Composer's dark theme",
+        'dark': True,
+        'colors': {role: globals()[role] for role in THEME_ROLES},
+        'editor': dict(EDITOR),
+        'graph': dict(GRAPH),
+    },
+}
+
+THEMES["Light"] = _theme(
+    "A bright theme with cool greys and blue accents", dark=False,
+    colors=dict(
+        BLACK="#d0d7de", DARK_GRAY="#f6f8fa", GRAY="#ffffff", LIGHT_GRAY="#656d76",
+        SMOKE="#1f2328", WHITE="#0d1117", BLUE="#2f74c0", SKY="#1f75d6", ORANGE="#bc4c00",
+        CARROT="#d4760a", RED="#cf222e", PURPLE="#8250df", GREEN="#1a7f37", SUCCESS="#1a7f37",
+        BODY_BG="#f6f8fa", PANEL_BG="#ffffff", TITLE_BAR_BG="#e6eaef", INPUT_BG="#ffffff",
+        INPUT_BORDER="#d0d7de", INPUT_BG_DISABLED="#eef1f4", STATUS_BAR_BG="#e6eaef",
+        TERMINAL_BG="#fbfcfd", SELECTED_BG="#dbe9fb", HOVER_BORDER="#afb8c1",
+        BTN_PRIMARY_BORDER="#255fa0", TEXT="#1f2328", TEXT_MUTED="#656d76", TEXT_DISABLED="#8c959f",
+        ON_ACCENT="#ffffff", ICON_DISABLED="#b6bdc4", LINE_SUBTLE="#e1e5e9", ALT_BASE="#f6f8fa",
+        BUTTON_HOVER="#eef1f4", BUTTON_PRESSED="#e1e5ea", BTN_PRIMARY_HOVER="#3a82d0",
+        BTN_PRIMARY_PRESSED="#24629f", LINK_HOVER="#0f5bb5", TOOL_PRESSED="#e1e5ea",
+        SIDEBAR_HOVER="#f3f5f7", SIDEBAR_SELECTED_BG="#e3edfa", HIGHLIGHT_INACTIVE="#e7edf5",
+        TOOLTIP_BG="#24292f", TOOLTIP_TEXT="#f6f8fa", SCROLL_HANDLE="#c3c9cf",
+        SCROLL_HANDLE_HOVER="#8c959f", SHADOW="#a8b0b8", PALETTE_MIDLIGHT="#e5e8eb",
+        PALETTE_MID="#c9d1d9", TOGGLE_KNOB="#ffffff", TOGGLE_TRACK_OFF="#d0d7de", RADIUS=4,
+        CODE_BASE_CMD="#8250df", CODE_INPUTS="#1a7f37", CODE_ARGS="#bc4c00",
+        CODE_STREAM="#1f2328", CODE_WARNING="#9a6700", CODE_ERROR="#cf222e", GRAPH_GRID="dots",
+    ),
+    editor=dict(
+        background="#ffffff", foreground="#1f2328", gutter_background="#f6f8fa",
+        gutter_foreground="#8c959f", caret="#1f2328", caret_line="#f6f8fa", selection="#cce3fd",
+        keyword="#cf222e", constant="#0550ae", string="#0a3069", regexp="#116329",
+        comment="#6e7781", tag="#116329", entity="#8250df", function="#8250df",
+        invalid="#cf222e", fold="#57606a",
+    ),
+    graph=dict(
+        background=(246, 248, 250), grid=(214, 220, 226), edge=(140, 149, 159, 255),
+        step=(13, 148, 148), step_conditional=(130, 80, 223), io=(120, 130, 141),
+        io_optional=(190, 198, 206), port=(120, 130, 141), port_hover=(31, 35, 40),
+        primary=(31, 117, 214), label=(31, 35, 40), faded=(226, 230, 234),
+        faded_step=(164, 207, 207), faded_io=(196, 202, 208), faded_label=(170, 177, 184),
+    ),
+)
+
+THEMES["Midnight"] = _theme(
+    "A deep blue dark theme with bright blue accents", dark=True,
+    colors=dict(
+        BLACK="#10141c", DARK_GRAY="#1c2230", GRAY="#232a38", LIGHT_GRAY="#8b97ab",
+        SMOKE="#d5dbe6", WHITE="#ffffff", BLUE="#2f6fd1", SKY="#5aa2ff", ORANGE="#e0943a",
+        CARROT="#f0a35e", RED="#f06b5a", PURPLE="#b59cf5", GREEN="#7fcf72", SUCCESS="#57b05a",
+        BODY_BG="#1c2230", PANEL_BG="#232a38", TITLE_BAR_BG="#141923", INPUT_BG="#1a202b",
+        INPUT_BORDER="#10141c", INPUT_BG_DISABLED="#232a38", STATUS_BAR_BG="#171c27",
+        TERMINAL_BG="#121620", SELECTED_BG="#2b4870", HOVER_BORDER="#4a5873",
+        BTN_PRIMARY_BORDER="#2459a8", TEXT="#d5dbe6", TEXT_MUTED="#8b97ab", TEXT_DISABLED="#5f6b80",
+        ON_ACCENT="#ffffff", ICON_DISABLED="#4b5568", LINE_SUBTLE="#2f3849", ALT_BASE="#202735",
+        BUTTON_HOVER="#253042", BUTTON_PRESSED="#161c27", BTN_PRIMARY_HOVER="#3c7ee0",
+        BTN_PRIMARY_PRESSED="#2662bd", LINK_HOVER="#8cc0ff", TOOL_PRESSED="#1e2533",
+        SIDEBAR_HOVER="#28303f", SIDEBAR_SELECTED_BG="#2b3446", HIGHLIGHT_INACTIVE="#263347",
+        TOOLTIP_BG="#0d1117", TOOLTIP_TEXT="#d5dbe6", SCROLL_HANDLE="#4a5568",
+        SCROLL_HANDLE_HOVER="#8b97ab", SHADOW="#07090d", PALETTE_MIDLIGHT="#2a3244",
+        PALETTE_MID="#141922", TOGGLE_KNOB="#e6ebf3", TOGGLE_TRACK_OFF="#2a3346", RADIUS=4,
+        CODE_BASE_CMD="#b59cf5", CODE_INPUTS="#7fcf72", CODE_ARGS="#f2a65a",
+        CODE_STREAM="#c9d1d9", CODE_WARNING="#e0943a", CODE_ERROR="#f06b5a", GRAPH_GRID="dots",
+    ),
+    editor=dict(
+        background="#1b2130", foreground="#c9d1d9", gutter_background="#1b2130",
+        gutter_foreground="#5c6a82", caret="#5aa2ff", caret_line="#222a3a", selection="#2d4a73",
+        keyword="#ff7b72", constant="#79c0ff", string="#a5d6ff", regexp="#7ee787",
+        comment="#8b949e", tag="#7ee787", entity="#d2a8ff", function="#d2a8ff",
+        invalid="#ffa198", fold="#8b949e",
+    ),
+    graph=dict(
+        background=(28, 34, 48), grid=(46, 56, 74), edge=(110, 124, 148, 255),
+        step=(32, 178, 170), step_conditional=(181, 156, 245), io=(200, 208, 222),
+        io_optional=(100, 112, 134), port=(200, 208, 222), port_hover=(255, 255, 255),
+        primary=(90, 162, 255), label=(213, 219, 230), faded=(42, 50, 66),
+        faded_step=(26, 92, 96), faded_io=(110, 118, 134), faded_label=(100, 110, 128),
+    ),
+)
+
+THEMES["Nord"] = _theme(
+    "The Nord palette: arctic greys with frost blue accents", dark=True,
+    colors=dict(
+        BLACK="#242933", DARK_GRAY="#2e3440", GRAY="#3b4252", LIGHT_GRAY="#9ba6b9",
+        SMOKE="#e5e9f0", WHITE="#eceff4", BLUE="#5e81ac", SKY="#88c0d0", ORANGE="#ebcb8b",
+        CARROT="#d08770", RED="#bf616a", PURPLE="#b48ead", GREEN="#a3be8c", SUCCESS="#a3be8c",
+        BODY_BG="#2e3440", PANEL_BG="#3b4252", TITLE_BAR_BG="#272c36", INPUT_BG="#343a46",
+        INPUT_BORDER="#242933", INPUT_BG_DISABLED="#3b4252", STATUS_BAR_BG="#2b303b",
+        TERMINAL_BG="#262b35", SELECTED_BG="#3e5675", HOVER_BORDER="#616e88",
+        BTN_PRIMARY_BORDER="#4c6d94", TEXT="#e5e9f0", TEXT_MUTED="#9ba6b9", TEXT_DISABLED="#6b7588",
+        ON_ACCENT="#ffffff", ICON_DISABLED="#59637a", LINE_SUBTLE="#4c566a", ALT_BASE="#363d4a",
+        BUTTON_HOVER="#3b4252", BUTTON_PRESSED="#272c36", BTN_PRIMARY_HOVER="#6a8dbb",
+        BTN_PRIMARY_PRESSED="#52749e", LINK_HOVER="#a7d3df", TOOL_PRESSED="#343a46",
+        SIDEBAR_HOVER="#424a5a", SIDEBAR_SELECTED_BG="#434c5e", HIGHLIGHT_INACTIVE="#3b4a5e",
+        TOOLTIP_BG="#242933", TOOLTIP_TEXT="#e5e9f0", SCROLL_HANDLE="#4c566a",
+        SCROLL_HANDLE_HOVER="#81a1c1", SHADOW="#1d2128", PALETTE_MIDLIGHT="#434c5e",
+        PALETTE_MID="#262b34", TOGGLE_KNOB="#eceff4", TOGGLE_TRACK_OFF="#4c566a", RADIUS=4,
+        CODE_BASE_CMD="#b48ead", CODE_INPUTS="#a3be8c", CODE_ARGS="#d08770",
+        CODE_STREAM="#d8dee9", CODE_WARNING="#ebcb8b", CODE_ERROR="#bf616a", GRAPH_GRID="dots",
+    ),
+    editor=dict(
+        background="#2e3440", foreground="#d8dee9", gutter_background="#2e3440",
+        gutter_foreground="#616e88", caret="#d8dee9", caret_line="#3b4252", selection="#434c5e",
+        keyword="#81a1c1", constant="#b48ead", string="#a3be8c", regexp="#ebcb8b",
+        comment="#616e88", tag="#8fbcbb", entity="#88c0d0", function="#88c0d0",
+        invalid="#bf616a", fold="#81a1c1",
+    ),
+    graph=dict(
+        background=(46, 52, 64), grid=(67, 76, 94), edge=(129, 140, 160, 255),
+        step=(143, 188, 187), step_conditional=(180, 142, 173), io=(216, 222, 233),
+        io_optional=(110, 120, 140), port=(216, 222, 233), port_hover=(236, 239, 244),
+        primary=(136, 192, 208), label=(229, 233, 240), faded=(59, 66, 82),
+        faded_step=(82, 110, 114), faded_io=(120, 128, 144), faded_label=(110, 118, 134),
+    ),
+)
+
+THEMES["Solarized Light"] = _theme(
+    "Ethan Schoonover's Solarized, light variant: warm paper tones", dark=False,
+    colors=dict(
+        BLACK="#ddd6c1", DARK_GRAY="#fdf6e3", GRAY="#f7f0dc", LIGHT_GRAY="#839496",
+        SMOKE="#586e75", WHITE="#073642", BLUE="#268bd2", SKY="#268bd2", ORANGE="#cb4b16",
+        CARROT="#b58900", RED="#dc322f", PURPLE="#6c71c4", GREEN="#859900", SUCCESS="#859900",
+        BODY_BG="#fdf6e3", PANEL_BG="#f7f0dc", TITLE_BAR_BG="#eee8d5", INPUT_BG="#fffcf3",
+        INPUT_BORDER="#d9d2bd", INPUT_BG_DISABLED="#f3edda", STATUS_BAR_BG="#eee8d5",
+        TERMINAL_BG="#fbf5e4", SELECTED_BG="#e4dcc3", HOVER_BORDER="#c4bba3",
+        BTN_PRIMARY_BORDER="#1f75b3", TEXT="#586e75", TEXT_MUTED="#839496", TEXT_DISABLED="#a6b0ae",
+        ON_ACCENT="#fdf6e3", ICON_DISABLED="#c3c7bd", LINE_SUBTLE="#e4ddc8", ALT_BASE="#f7f1df",
+        BUTTON_HOVER="#f3edda", BUTTON_PRESSED="#e8e1cc", BTN_PRIMARY_HOVER="#3797dc",
+        BTN_PRIMARY_PRESSED="#1f78b8", LINK_HOVER="#1a6aa3", TOOL_PRESSED="#e8e1cc",
+        SIDEBAR_HOVER="#f0e9d6", SIDEBAR_SELECTED_BG="#e6dfc8", HIGHLIGHT_INACTIVE="#ece5d0",
+        TOOLTIP_BG="#073642", TOOLTIP_TEXT="#eee8d5", SCROLL_HANDLE="#d3cbb3",
+        SCROLL_HANDLE_HOVER="#93a1a1", SHADOW="#b8b09a", PALETTE_MIDLIGHT="#ece5d0",
+        PALETTE_MID="#cfc8b2", TOGGLE_KNOB="#fffdf6", TOGGLE_TRACK_OFF="#d9d2bd", RADIUS=4,
+        CODE_BASE_CMD="#6c71c4", CODE_INPUTS="#859900", CODE_ARGS="#cb4b16",
+        CODE_STREAM="#586e75", CODE_WARNING="#b58900", CODE_ERROR="#dc322f", GRAPH_GRID="dots",
+    ),
+    editor=dict(
+        background="#fdf6e3", foreground="#657b83", gutter_background="#eee8d5",
+        gutter_foreground="#93a1a1", caret="#586e75", caret_line="#eee8d5", selection="#ddd6c1",
+        keyword="#859900", constant="#d33682", string="#2aa198", regexp="#dc322f",
+        comment="#93a1a1", tag="#268bd2", entity="#b58900", function="#268bd2",
+        invalid="#dc322f", fold="#93a1a1",
+    ),
+    graph=dict(
+        background=(253, 246, 227), grid=(226, 219, 199), edge=(147, 161, 161, 255),
+        step=(42, 161, 152), step_conditional=(108, 113, 196), io=(101, 123, 131),
+        io_optional=(196, 203, 195), port=(101, 123, 131), port_hover=(7, 54, 66),
+        primary=(38, 139, 210), label=(88, 110, 117), faded=(236, 229, 210),
+        faded_step=(160, 205, 198), faded_io=(200, 204, 194), faded_label=(170, 180, 178),
+    ),
+)
 
 TITLE_FONT_FAMILY = "Montserrat"
 ICON_FONT_FAMILY = "FontAwesome"
@@ -148,13 +361,13 @@ _MIRRORED = {'share-alt'}
 ICON_KEYS = {
     'programming': ('code', None),
     'remove': ('trash', None),
-    'add': ('plus', SKY),
+    'add': ('plus', 'SKY'),
     'edit': ('pencil', None),
-    'info': ('info-circle', SKY),
+    'info': ('info-circle', 'SKY'),
     'ai': ('magic', None),
-    'workflow': ('share-alt', CARROT),
-    'tool': ('terminal', PURPLE),
-    'expressiontool': ('code', SKY),
+    'workflow': ('share-alt', 'CARROT'),
+    'tool': ('terminal', 'PURPLE'),
+    'expressiontool': ('code', 'SKY'),
     'uparrow': ('arrow-up', None),
     'downarrow': ('arrow-down', None),
     'save': ('floppy-o', None),
@@ -169,21 +382,56 @@ ICON_KEYS = {
 }
 
 
+# Colour roles an icon follows when the theme changes, most specific first
+_ICON_ROLES = ('TEXT', 'TEXT_MUTED', 'WHITE', 'SKY', 'BLUE', 'PURPLE', 'CARROT', 'ORANGE', 'RED',
+               'GREEN', 'SUCCESS', 'ON_ACCENT', 'ICON_DISABLED', 'TEXT_DISABLED', 'LIGHT_GRAY',
+               'SMOKE', 'BLACK', 'GRAY', 'DARK_GRAY', 'BODY_BG', 'PANEL_BG')
+
+
+def _colorRole(color: Optional[str]) -> Optional[str]:
+    """The theme role whose colour ``color`` is, if any."""
+    if not color:
+        return None
+    value = QColor(color).name()
+    for role in _ICON_ROLES:
+        if QColor(globals()[role]).name() == value:
+            return role
+    return None
+
+
+def _codeRole(color: Optional[str]) -> Optional[str]:
+    """The command line colour role of ``color`` (section stripes), if any."""
+    if not color:
+        return None
+    value = QColor(color).name()
+    for role in ('CODE_BASE_CMD', 'CODE_ARGS', 'CODE_INPUTS', 'CODE_STREAM'):
+        if QColor(globals()[role]).name() == value:
+            return role
+    return None
+
+
 class _GlyphIconEngine(QIconEngine):
-    """Icon engine painting a single Font Awesome glyph at any size."""
+    """
+    Icon engine painting a single Font Awesome glyph at any size. A colour
+    of the theme is remembered by its role, so the icon follows theme changes.
+    """
 
     def __init__(self, glyph: str, color: str, active_color: str,
                  disabled_color: str, mirrored: bool = False, scale: float = 0.86):
         super().__init__()
         self._glyph = glyph
         self._colors = {
-            QIcon.Mode.Normal: color,
-            QIcon.Mode.Active: active_color,
-            QIcon.Mode.Selected: active_color,
-            QIcon.Mode.Disabled: disabled_color,
+            QIcon.Mode.Normal: (_colorRole(color), color),
+            QIcon.Mode.Active: (_colorRole(active_color), active_color),
+            QIcon.Mode.Selected: (_colorRole(active_color), active_color),
+            QIcon.Mode.Disabled: (_colorRole(disabled_color), disabled_color),
         }
         self._mirrored = mirrored
         self._scale = scale
+
+    def _color(self, mode: QIcon.Mode) -> QColor:
+        role, color = self._colors.get(mode, self._colors[QIcon.Mode.Normal])
+        return QColor(globals()[role] if role else color)
 
     def paint(self, painter: QPainter, rect: QRect, mode: QIcon.Mode, state: QIcon.State):
         painter.save()
@@ -192,7 +440,7 @@ class _GlyphIconEngine(QIconEngine):
         font = QFont(ICON_FONT_FAMILY)
         font.setPixelSize(max(1, round(min(rect.width(), rect.height()) * self._scale)))
         painter.setFont(font)
-        painter.setPen(QColor(self._colors.get(mode, self._colors[QIcon.Mode.Normal])))
+        painter.setPen(self._color(mode))
         if self._mirrored:
             painter.translate(2 * rect.x() + rect.width(), 0)
             painter.scale(-1, 1)
@@ -213,14 +461,13 @@ class _GlyphIconEngine(QIconEngine):
         return pixmap
 
     def clone(self) -> QIconEngine:
-        return _GlyphIconEngine(self._glyph, self._colors[QIcon.Mode.Normal],
-                                self._colors[QIcon.Mode.Active],
-                                self._colors[QIcon.Mode.Disabled],
-                                self._mirrored, self._scale)
+        engine = _GlyphIconEngine(self._glyph, None, None, None, self._mirrored, self._scale)
+        engine._colors = dict(self._colors)
+        return engine
 
 
 def icon(name: str, color: Optional[str] = None, active_color: Optional[str] = None,
-         disabled_color: str = "#5f5f5f") -> QIcon:
+         disabled_color: Optional[str] = None) -> QIcon:
     """
     Return a Composer-style icon.
 
@@ -237,6 +484,7 @@ def icon(name: str, color: Optional[str] = None, active_color: Optional[str] = N
     glyph_name = name
     if name in ICON_KEYS:
         glyph_name, key_color = ICON_KEYS[name]
+        key_color = globals()[key_color] if key_color in THEME_ROLES else key_color
     glyph = FA.get(glyph_name)
     if glyph is None:
         # Not a themed icon; fall back to the configured image, if any
@@ -249,7 +497,7 @@ def icon(name: str, color: Optional[str] = None, active_color: Optional[str] = N
     color = color or key_color or TEXT_MUTED
     if active_color is None:
         active_color = color if (key_color or color != TEXT_MUTED) else TEXT
-    return QIcon(_GlyphIconEngine(glyph, color, active_color, disabled_color,
+    return QIcon(_GlyphIconEngine(glyph, color, active_color, disabled_color or ICON_DISABLED,
                                   mirrored=glyph_name in _MIRRORED))
 
 
@@ -262,6 +510,7 @@ def _cacheDir() -> Path:
 def iconFile(name: str, color: Optional[str] = None, size: int = 64) -> str:
     """Render an icon to a PNG file (for APIs that need a path) and return its path."""
     glyph_name, key_color = ICON_KEYS.get(name, (name, None))
+    key_color = globals()[key_color] if key_color in THEME_ROLES else key_color
     color = color or key_color or TEXT_MUTED
     path = _cacheDir() / f"{glyph_name}-{color.lstrip('#')}-{size}.png"
     if not path.exists():
@@ -499,6 +748,7 @@ class FormSection(QFrame):
             self.setProperty('borderless', True)
         self._widget = widget
         self._stripe = QColor(stripe) if stripe else None
+        self._stripe_role = _codeRole(stripe) or _colorRole(stripe)
 
         header = getattr(widget, 'header', None)
         if header is not None and hasattr(header, 'addButtonClicked'):
@@ -628,8 +878,9 @@ class FormSection(QFrame):
     def paintEvent(self, event):
         super().paintEvent(event)
         if self._stripe is not None:
+            stripe = QColor(globals()[self._stripe_role]) if self._stripe_role else self._stripe
             painter = QPainter(self)
-            painter.fillRect(QRect(0, 0, self.STRIPE_WIDTH, self.height()), self._stripe)
+            painter.fillRect(QRect(0, 0, self.STRIPE_WIDTH, self.height()), stripe)
             painter.end()
 
 
@@ -946,13 +1197,19 @@ def styleCodeEditor(editor, lexer=None):
     editor.setFoldMarginColors(gutter, gutter)
     editor.setMarkerBackgroundColor(QColor(EDITOR['gutter_foreground']))
     editor.setMarkerForegroundColor(gutter)
+    # the fold markers (Scintilla 25-31) are not reached by the calls above:
+    # their lines in the gutter text colour, boxes filled with the gutter colour
+    # (QScintilla only colours the markers it allocated itself)
+    for marker in range(25, 32):
+        editor.SendScintilla(editor.SCI_MARKERSETFORE, marker, gutter)
+        editor.SendScintilla(editor.SCI_MARKERSETBACK, marker, QColor(EDITOR['gutter_foreground']))
     editor.setCaretForegroundColor(QColor(EDITOR['caret']))
     editor.setCaretLineBackgroundColor(QColor(EDITOR['caret_line']))
     editor.setSelectionBackgroundColor(QColor(EDITOR['selection']))
-    editor.setMatchedBraceBackgroundColor(QColor("#4a4a4a"))
+    editor.setMatchedBraceBackgroundColor(QColor(LINE_SUBTLE))
     editor.setMatchedBraceForegroundColor(foreground)
     editor.setUnmatchedBraceForegroundColor(QColor(EDITOR['invalid']))
-    editor.setIndentationGuidesForegroundColor(QColor("#4a4a4a"))
+    editor.setIndentationGuidesForegroundColor(QColor(LINE_SUBTLE))
     editor.setIndentationGuidesBackgroundColor(background)
     if lexer is None:
         return
@@ -993,6 +1250,14 @@ def styleCodeEditor(editor, lexer=None):
             lexer.setFont(font, style)
 
 
+def setMuted(widget: QWidget, muted: bool = True) -> QWidget:
+    """Show a label or field in the muted text colour (e.g. optional entries)."""
+    widget.setProperty('muted', bool(muted))
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+    return widget
+
+
 def setButtonRole(button: QWidget, role: str) -> QWidget:
     """
     Mark a button as 'primary' (blue), 'link' (text link), 'iconButton'
@@ -1013,19 +1278,19 @@ def _palette() -> QPalette:
         QPalette.ColorRole.Window: BODY_BG,
         QPalette.ColorRole.WindowText: TEXT,
         QPalette.ColorRole.Base: INPUT_BG,
-        QPalette.ColorRole.AlternateBase: "#383838",
-        QPalette.ColorRole.ToolTipBase: BLACK,
-        QPalette.ColorRole.ToolTipText: TEXT,
+        QPalette.ColorRole.AlternateBase: ALT_BASE,
+        QPalette.ColorRole.ToolTipBase: TOOLTIP_BG,
+        QPalette.ColorRole.ToolTipText: TOOLTIP_TEXT,
         QPalette.ColorRole.PlaceholderText: TEXT_MUTED,
         QPalette.ColorRole.Text: TEXT,
         QPalette.ColorRole.Button: BODY_BG,
         QPalette.ColorRole.ButtonText: TEXT,
         QPalette.ColorRole.BrightText: WHITE,
-        QPalette.ColorRole.Light: "#4a4a4a",
-        QPalette.ColorRole.Midlight: "#424242",
-        QPalette.ColorRole.Mid: "#2a2a2a",
+        QPalette.ColorRole.Light: LINE_SUBTLE,
+        QPalette.ColorRole.Midlight: PALETTE_MIDLIGHT,
+        QPalette.ColorRole.Mid: PALETTE_MID,
         QPalette.ColorRole.Dark: BLACK,
-        QPalette.ColorRole.Shadow: "#141414",
+        QPalette.ColorRole.Shadow: SHADOW,
         QPalette.ColorRole.Highlight: SELECTED_BG,
         QPalette.ColorRole.HighlightedText: WHITE,
         QPalette.ColorRole.Link: SKY,
@@ -1038,13 +1303,15 @@ def _palette() -> QPalette:
                  QPalette.ColorRole.ButtonText):
         palette.setColor(disabled, role, QColor(TEXT_DISABLED))
     palette.setColor(disabled, QPalette.ColorRole.Base, QColor(INPUT_BG_DISABLED))
-    palette.setColor(disabled, QPalette.ColorRole.Highlight, QColor("#3a4558"))
+    palette.setColor(disabled, QPalette.ColorRole.Highlight, QColor(HIGHLIGHT_INACTIVE))
     return palette
 
 
 def _toggleImage(checked: bool, disabled: bool = False) -> str:
     """Composer ct-toggle-slider (40x20 pill with a 17px knob), saved at 1x and @2x."""
-    name = f"toggle-{'on' if checked else 'off'}{'-disabled' if disabled else ''}"
+    colours = "".join(c.lstrip('#') for c in (SKY, TOGGLE_TRACK_OFF, INPUT_BORDER, INPUT_BG_DISABLED,
+                                                TOGGLE_KNOB, TEXT_DISABLED))
+    name = f"toggle-{'on' if checked else 'off'}{'-disabled' if disabled else ''}-{colours}"
     path = _cacheDir() / f"{name}.png"
     for scale, file_path in ((1, path), (2, _cacheDir() / f"{name}@2x.png")):
         if file_path.exists():
@@ -1054,14 +1321,14 @@ def _toggleImage(checked: bool, disabled: bool = False) -> str:
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.scale(scale, scale)
-        track = QColor(SKY if checked else INPUT_BG)
+        track = QColor(SKY if checked else TOGGLE_TRACK_OFF)
         if disabled:
             track = QColor(INPUT_BG_DISABLED)
         painter.setPen(QColor(SKY if checked and not disabled else INPUT_BORDER))
         painter.setBrush(track)
         painter.drawRoundedRect(QRectF(0.5, 0.5, 39, 19), 9.5, 9.5)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(TEXT if not disabled else TEXT_DISABLED))
+        painter.setBrush(QColor(TOGGLE_KNOB if not disabled else TEXT_DISABLED))
         knob_x = 21 if checked else 2
         painter.drawEllipse(QRectF(knob_x, 1.5, 17, 17))
         painter.end()
@@ -1075,13 +1342,13 @@ def _indicatorImages() -> dict:
         'select_arrows': ('sort', TEXT, 16),
         'angle_right': ('angle-right', TEXT, 16),
         'angle_down': ('angle-down', TEXT, 16),
-        'select_arrows_disabled': ('sort', "#5f5f5f", 16),
+        'select_arrows_disabled': ('sort', ICON_DISABLED, 16),
         'caret_down': ('caret-down', TEXT_MUTED, 16),
-        'caret_down_disabled': ('caret-down', "#5f5f5f", 16),
+        'caret_down_disabled': ('caret-down', ICON_DISABLED, 16),
         'caret_up': ('caret-up', TEXT_MUTED, 16),
         'caret_right': ('caret-right', TEXT_MUTED, 16),
-        'check': ('check', WHITE, 16),
-        'minus': ('minus', WHITE, 16),
+        'check': ('check', ON_ACCENT, 16),
+        'minus': ('minus', ON_ACCENT, 16),
         'times': ('times', TEXT_MUTED, 16),
         'times_hover': ('times', WHITE, 16),
     }
@@ -1096,7 +1363,7 @@ def _indicatorImages() -> dict:
 STYLE_SHEET = """
 /* ---------- general ---------- */
 QToolTip {{
-    color: {TEXT}; background-color: {BLACK}; border: 1px solid {BLACK}; padding: 4px 6px;
+    color: {TOOLTIP_TEXT}; background-color: {TOOLTIP_BG}; border: 1px solid {TOOLTIP_BG}; padding: 4px 6px;
 }}
 QDialog {{ background-color: {PANEL_BG}; }}
 ChildWindow {{ background-color: {BODY_BG}; }}
@@ -1108,8 +1375,8 @@ QScrollArea > QWidget > QWidget {{ background: transparent; }}
 /* ---------- inputs (.form-control) ---------- */
 QLineEdit, QAbstractSpinBox, QComboBox, QTextEdit, QPlainTextEdit {{
     background-color: {INPUT_BG}; color: {TEXT};
-    border: 1px solid {INPUT_BORDER}; border-radius: 2px;
-    selection-background-color: {BLUE}; selection-color: {WHITE};
+    border: 1px solid {INPUT_BORDER}; border-radius: {RADIUS}px;
+    selection-background-color: {BLUE}; selection-color: {ON_ACCENT};
 }}
 QLineEdit, QAbstractSpinBox, QComboBox {{ padding: 3px 7px; }}
 QLineEdit:focus, QAbstractSpinBox:focus, QComboBox:focus,
@@ -1143,32 +1410,32 @@ QAbstractSpinBox::down-arrow {{ image: url({caret_down}); width: 9px; height: 9p
 /* ---------- buttons (.btn) ---------- */
 QPushButton {{
     background-color: {BODY_BG}; color: {TEXT};
-    border: 1px solid {BLACK}; border-radius: 2px; padding: 5px 14px;
+    border: 1px solid {BLACK}; border-radius: {RADIUS}px; padding: 5px 14px;
 }}
-QPushButton:hover {{ background-color: #383838; }}
-QPushButton:pressed, QPushButton:checked {{ background-color: #262626; }}
+QPushButton:hover {{ background-color: {BUTTON_HOVER}; }}
+QPushButton:pressed, QPushButton:checked {{ background-color: {BUTTON_PRESSED}; }}
 QPushButton:disabled {{ color: {TEXT_DISABLED}; background-color: {BODY_BG}; }}
 QPushButton:flat {{ background: transparent; border: none; }}
 QPushButton[primary="true"],
 QDialogButtonBox QPushButton:default, QMessageBox QPushButton:default {{
-    background-color: {BLUE}; border-color: {BTN_PRIMARY_BORDER}; color: {WHITE};
+    background-color: {BLUE}; border-color: {BTN_PRIMARY_BORDER}; color: {ON_ACCENT};
 }}
 QPushButton[primary="true"]:hover,
 QDialogButtonBox QPushButton:default:hover, QMessageBox QPushButton:default:hover {{
-    background-color: #3a88c9;
+    background-color: {BTN_PRIMARY_HOVER};
 }}
-QPushButton[primary="true"]:pressed {{ background-color: #2c6ca2; }}
+QPushButton[primary="true"]:pressed {{ background-color: {BTN_PRIMARY_PRESSED}; }}
 QPushButton[link="true"] {{
     background: transparent; border: none; color: {SKY}; padding: 4px 0; text-align: left;
 }}
-QPushButton[link="true"]:hover {{ color: #9ac5f5; }}
+QPushButton[link="true"]:hover {{ color: {LINK_HOVER}; }}
 QPushButton[iconButton="true"] {{
     background: transparent; border: 1px solid transparent; padding: 2px;
 }}
 QPushButton[iconButton="true"]:hover {{ background-color: {INPUT_BG}; border-color: {HOVER_BORDER}; }}
 /* expression input addon button (input-group .btn-icon) */
 QPushButton[addon="true"] {{
-    background-color: {BODY_BG}; border: 1px solid {INPUT_BORDER}; border-radius: 2px; padding: 0;
+    background-color: {BODY_BG}; border: 1px solid {INPUT_BORDER}; border-radius: {RADIUS}px; padding: 0;
 }}
 QPushButton[addon="true"]:hover {{ border-color: {SKY}; }}
 QPushButton[plainIcon="true"], QPushButton[plainIcon="true"]:hover, QPushButton[plainIcon="true"]:pressed {{
@@ -1187,10 +1454,10 @@ QPushButton[graphControl="last"] {{ border-top-left-radius: 0; border-bottom-lef
 /* ---------- control buttons / toolbars (.control-button) ---------- */
 QToolButton {{
     background: transparent; color: {TEXT};
-    border: 1px solid transparent; border-radius: 2px; padding: 3px;
+    border: 1px solid transparent; border-radius: {RADIUS}px; padding: 3px;
 }}
 QToolButton:hover {{ background-color: {INPUT_BG}; border-color: {HOVER_BORDER}; }}
-QToolButton:pressed {{ background-color: #343434; }}
+QToolButton:pressed {{ background-color: {TOOL_PRESSED}; }}
 QToolButton:checked {{ background-color: {BLACK}; }}
 QToolButton:disabled {{ color: {TEXT_DISABLED}; }}
 QToolBar {{ background: transparent; border: none; spacing: 2px; padding: 0 4px; }}
@@ -1207,7 +1474,7 @@ QTabBar::tab {{
 }}
 QTabBar::tab:hover {{ color: {TEXT}; }}
 QTabBar::tab:selected {{ color: {TEXT}; border-bottom-color: {SKY}; }}
-QTabBar::tab:disabled {{ color: #5f5f5f; }}
+QTabBar::tab:disabled {{ color: {ICON_DISABLED}; }}
 
 /* editor sub tabs (App Info / Visual Editor / Code) on the action bar */
 QTabWidget#editorTabs {{ background-color: {PANEL_BG}; }}
@@ -1234,17 +1501,17 @@ QTabWidget#workbox > QTabBar QToolButton {{ background-color: {TITLE_BAR_BG}; bo
 /* ---------- scroll bars (thin, rounded) ---------- */
 QScrollBar:vertical {{ background: transparent; width: 8px; margin: 0; }}
 QScrollBar:horizontal {{ background: transparent; height: 8px; margin: 0; }}
-QScrollBar::handle {{ background-color: {LIGHT_GRAY}; border-radius: 4px; }}
+QScrollBar::handle {{ background-color: {SCROLL_HANDLE}; border-radius: 4px; }}
 QScrollBar::handle:vertical {{ min-height: 24px; }}
 QScrollBar::handle:horizontal {{ min-width: 24px; }}
-QScrollBar::handle:hover, QScrollBar::handle:pressed {{ background-color: {SMOKE}; }}
+QScrollBar::handle:hover, QScrollBar::handle:pressed {{ background-color: {SCROLL_HANDLE_HOVER}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; border: none; background: none; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
 QAbstractScrollArea::corner {{ background: transparent; }}
 
 /* ---------- item views ---------- */
 QAbstractItemView {{
-    background-color: {INPUT_BG}; alternate-background-color: #383838; color: {TEXT};
+    background-color: {INPUT_BG}; alternate-background-color: {ALT_BASE}; color: {TEXT};
     border: 1px solid {BLACK}; outline: 0;
     selection-background-color: {SELECTED_BG}; selection-color: {WHITE};
     gridline-color: {BLACK};
@@ -1276,14 +1543,14 @@ QMenu::separator {{ height: 1px; background-color: {BLACK}; }}
 QCheckBox, QRadioButton {{ spacing: 6px; background: transparent; }}
 QCheckBox::indicator, QGroupBox::indicator {{
     width: 13px; height: 13px; background-color: {INPUT_BG};
-    border: 1px solid {HOVER_BORDER}; border-radius: 2px;
+    border: 1px solid {HOVER_BORDER}; border-radius: {RADIUS}px;
 }}
 QCheckBox::indicator:hover {{ border-color: {SKY}; }}
 QCheckBox::indicator:checked, QGroupBox::indicator:checked {{
     background-color: {SKY}; border-color: {SKY}; image: url({check});
 }}
 QCheckBox::indicator:indeterminate {{ background-color: {SKY}; border-color: {SKY}; image: url({minus}); }}
-QCheckBox::indicator:disabled {{ background-color: {PANEL_BG}; border-color: #4a4a4a; }}
+QCheckBox::indicator:disabled {{ background-color: {PANEL_BG}; border-color: {LINE_SUBTLE}; }}
 /* ct-toggle-slider */
 QCheckBox[toggle="true"] {{ spacing: 0; }}
 QCheckBox[toggle="true"]::indicator {{
@@ -1299,26 +1566,26 @@ QRadioButton::indicator {{
 QRadioButton::indicator:checked {{
     border-color: {SKY};
     background-color: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
-        stop:0 {WHITE}, stop:0.32 {WHITE}, stop:0.42 {SKY}, stop:1 {SKY});
+        stop:0 {ON_ACCENT}, stop:0.32 {ON_ACCENT}, stop:0.42 {SKY}, stop:1 {SKY});
 }}
 
 /* ---------- containers ---------- */
 QGroupBox {{
-    background-color: {PANEL_BG}; border: 1px solid {BLACK}; border-radius: 2px;
+    background-color: {PANEL_BG}; border: 1px solid {BLACK}; border-radius: {RADIUS}px;
     margin-top: 18px; padding: 10px 8px 8px 8px;
 }}
 QGroupBox::title {{
     subcontrol-origin: margin; subcontrol-position: top left; left: 4px; padding: 0 2px;
     color: {TEXT};
 }}
-QFrame#formSection {{ background-color: {PANEL_BG}; border: none; border-radius: 2px; }}
+QFrame#formSection {{ background-color: {PANEL_BG}; border: none; border-radius: {RADIUS}px; }}
 QFrame#formSection[borderless="true"] {{ background: transparent; }}
 QLabel[help="true"] {{ color: {TEXT_MUTED}; }}
 QLineEdit[expression="true"] {{ padding-left: 30px; color: {TEXT_MUTED}; }}
 QLabel#expressionPrefix {{ color: {TEXT_MUTED}; font-weight: bold; background: transparent; }}
 QLineEdit[invalid="true"] {{ border-color: {RED}; }}
 /* expression editor modal */
-QFrame#modalFrame {{ background-color: {PANEL_BG}; border-radius: 2px; }}
+QFrame#modalFrame {{ background-color: {PANEL_BG}; border-radius: {RADIUS}px; }}
 QWidget#modalHeader {{ background-color: {TITLE_BAR_BG}; border-top-left-radius: 2px; border-top-right-radius: 2px; }}
 QWidget#modalFooter {{ background-color: {PANEL_BG}; border-top: 1px solid {BLACK}; }}
 QFrame#previewFrame {{ border: none; border-top: 1px solid {BLACK}; }}
@@ -1349,12 +1616,12 @@ QPushButton#portOptionsButton {{
     background: transparent; border: none; padding: 0 2px; min-height: 0; color: {TEXT};
 }}
 QPushButton#portOptionsButton:hover {{ color: {WHITE}; }}
-QFrame#portOptionsMenu {{ background-color: {INPUT_BG}; border: 1px solid {BLACK}; border-radius: 2px; }}
+QFrame#portOptionsMenu {{ background-color: {INPUT_BG}; border: 1px solid {BLACK}; border-radius: {RADIUS}px; }}
 QFrame#portOption {{ background: transparent; border: none; border-bottom: 1px solid {BLACK}; }}
 QFrame#portOption:hover, QFrame#portOption[active="true"] {{ background-color: {GRAY}; }}
 QFrame#portOption QLabel {{ background: transparent; }}
 QListWidget#scatterList {{
-    background-color: {INPUT_BG}; border: 1px solid {INPUT_BORDER}; border-radius: 2px; padding: 2px 0;
+    background-color: {INPUT_BG}; border: 1px solid {INPUT_BORDER}; border-radius: {RADIUS}px; padding: 2px 0;
 }}
 QListWidget#scatterList::item {{ padding: 3px 9px; color: {TEXT}; }}
 QListWidget#scatterList::item:selected {{ background-color: {SELECTED_BG}; color: {WHITE}; }}
@@ -1362,7 +1629,7 @@ QToolButton#sectionToggle, QToolButton#sectionToggle:hover, QToolButton#sectionT
     background: transparent; border: none; padding: 0;
 }}
 /* list entries (.editor-list-item) */
-QFrame#listRow {{ background-color: {INPUT_BG}; border: 1px solid {INPUT_BORDER}; border-radius: 2px; }}
+QFrame#listRow {{ background-color: {INPUT_BG}; border: 1px solid {INPUT_BORDER}; border-radius: {RADIUS}px; }}
 QFrame#listRow:hover {{ border-color: {SKY}; }}
 QFrame#listRow QLineEdit, QFrame#listRow QLabel {{
     background: transparent; border: none; padding: 0; margin: 0; color: {TEXT};
@@ -1373,7 +1640,7 @@ QSplitter::handle {{ background-color: {BLACK}; }}
 QSplitter::handle:horizontal {{ width: 4px; }}
 QSplitter::handle:vertical {{ height: 4px; }}
 QProgressBar {{
-    background-color: {INPUT_BG}; border: 1px solid {BLACK}; border-radius: 2px;
+    background-color: {INPUT_BG}; border: 1px solid {BLACK}; border-radius: {RADIUS}px;
     color: {TEXT}; text-align: center;
 }}
 QProgressBar::chunk {{ background-color: {SKY}; }}
@@ -1384,19 +1651,39 @@ QWidget#titleBar {{ background-color: {TITLE_BAR_BG}; }}
 QLabel#appTitle {{ color: {WHITE}; padding-left: 14px; }}
 QWidget#sidebar QAbstractItemView {{ background-color: {PANEL_BG}; border: none; }}
 QWidget#sidebar QAbstractItemView::item {{ padding: 3px 2px; }}
-QWidget#sidebar QAbstractItemView::item:hover {{ background-color: #363636; }}
-QWidget#sidebar QAbstractItemView::item:selected {{ background-color: {BODY_BG}; color: {WHITE}; }}
+QWidget#sidebar QAbstractItemView::item:hover {{ background-color: {SIDEBAR_HOVER}; }}
+QWidget#sidebar QAbstractItemView::item:selected {{ background-color: {SIDEBAR_SELECTED_BG}; color: {WHITE}; }}
+/* the selected row is filled across its whole width, indentation included */
+QWidget#sidebar QTreeView::branch:selected {{ background-color: {SIDEBAR_SELECTED_BG}; }}
 QWidget#sidebar QTabWidget::pane {{ border: none; }}
 QWidget#sidebar QTabBar::tab {{ min-height: 32px; padding: 0 16px; }}
 QWidget#welcome {{ background-color: {BODY_BG}; }}
 QFrame#creationEntry {{
-    background-color: {PANEL_BG}; border: 1px solid {INPUT_BORDER}; border-radius: 2px;
+    background-color: {PANEL_BG}; border: 1px solid {INPUT_BORDER}; border-radius: {RADIUS}px;
 }}
 QFrame#creationEntry:hover {{ border-color: {SKY}; }}
 QWidget#actionBar {{ background-color: {PANEL_BG}; border-bottom: 1px solid {BLACK}; }}
-QStatusBar {{ background-color: {STATUS_BAR_BG}; color: {TEXT}; border-top: 1px solid {BLACK}; }}
+QStatusBar {{ background-color: {STATUS_BAR_BG}; color: {TEXT}; border-top: 1px solid {BLACK}; font-size: 12px; }}
 QStatusBar::item {{ border: none; }}
-QStatusBar QLabel {{ color: {TEXT}; padding: 0 8px; }}
+QStatusBar QLabel {{ color: {TEXT}; padding: 0 8px; font-size: 12px; }}
+QToolButton#themeButton {{ padding: 2px 4px; }}
+QToolButton#themeButton::menu-indicator {{ image: none; width: 0; }}
+
+/* ---------- smaller widgets ---------- */
+QLineEdit[muted="true"], QFrame#listRow QLineEdit[muted="true"] {{ color: {TEXT_MUTED}; }}
+QLabel#fileUri {{
+    background-color: {INPUT_BG}; padding: 3px; border: 1px solid {INPUT_BORDER}; border-radius: {RADIUS}px;
+}}
+QWidget#fileInfoRibbon {{ background-color: {STATUS_BAR_BG}; border-top: 1px solid {BLACK}; }}
+QWidget#fileInfoRibbon QLabel {{ color: {TEXT_MUTED}; padding: 3px 8px; }}
+QWidget#recordFieldsContainer {{ border: 1px solid {BLACK}; border-radius: {RADIUS}px; margin-top: 5px; }}
+/* keyword tags (App Info) */
+Tag {{ background-color: {BLUE}; border: 1px solid {BTN_PRIMARY_BORDER}; border-radius: {RADIUS}px; }}
+Tag QLabel {{ color: {ON_ACCENT}; background: transparent; border: none; padding: 2px; }}
+Tag QPushButton {{
+    border: none; background: transparent; color: {ON_ACCENT}; font-weight: bold; padding: 0;
+}}
+Tag QPushButton:hover {{ color: {ON_ACCENT}; background-color: {BTN_PRIMARY_BORDER}; }}
 
 /* ---------- command line preview (ct-command-line-preview) ---------- */
 CommandLine {{ background-color: {TERMINAL_BG}; border-top: 1px solid {BLACK}; }}
@@ -1412,11 +1699,128 @@ def styleSheet() -> str:
 
 
 def applyTheme(app: QApplication):
-    """Install the Composer look and feel on the application."""
+    """Install the Composer look and feel, in the theme of the configuration."""
     loadFonts()
+    try:
+        import data
+        configured = (data.configuration or {}).get('theme')
+    except Exception:
+        configured = None
+    _install(configured if configured in THEMES else DEFAULT_THEME)
     app.setStyle('Fusion')
     app.setPalette(_palette())
     app.setStyleSheet(styleSheet())
     # workflow graph edges are drawn as cwl-svg edges
     import GraphItems
     GraphItems.patchPipes()
+
+
+# ---------------------------------------------------------------------------
+# Switching themes
+# ---------------------------------------------------------------------------
+class _ThemeNotifier(QObject):
+    themeChanged = pyqtSignal(str)
+
+
+notifier = _ThemeNotifier()
+_current_theme = DEFAULT_THEME
+# The graph colours of the theme before the last change: what is already
+# drawn in those colours is moved to the matching colours of the new theme.
+PREVIOUS_GRAPH: dict = {}
+
+
+def themeNames() -> list:
+    return list(THEMES)
+
+
+def currentTheme() -> str:
+    return _current_theme
+
+
+def isDark() -> bool:
+    return THEMES[_current_theme]['dark']
+
+
+def _install(name: str):
+    """Make ``name`` the current theme (module constants, EDITOR and GRAPH)."""
+    global _current_theme
+    theme = THEMES[name]
+    globals().update(theme['colors'])
+    EDITOR.clear()
+    EDITOR.update(theme['editor'])
+    GRAPH.clear()
+    GRAPH.update(theme['graph'])
+    _current_theme = name
+
+
+def setTheme(name: str, save: bool = True) -> str:
+    """
+    Switch the application to the theme ``name`` while it runs: the style
+    sheet and palette are replaced, icons follow on their own and the widgets
+    that keep colours of their own (graphs, code editors, ...) are refreshed.
+    Returns the name of the theme now in use.
+    """
+    global PREVIOUS_GRAPH
+    if name not in THEMES:
+        name = DEFAULT_THEME
+    PREVIOUS_GRAPH = dict(GRAPH)
+    _install(name)
+    app = QApplication.instance()
+    if app is not None:
+        app.setPalette(_palette())
+        app.setStyleSheet(styleSheet())
+        _refreshWidgets()
+    if save:
+        _saveThemeSetting(name)
+    notifier.themeChanged.emit(name)
+    return name
+
+
+def _refreshWidgets():
+    """Repaint what the style sheet does not reach."""
+    import GraphItems
+    GraphItems.themeChanged()
+    try:
+        from PyQt6.Qsci import QsciScintilla
+    except ImportError:
+        QsciScintilla = None
+    for widget in QApplication.allWidgets():
+        if sip.isdeleted(widget):
+            continue
+        if QsciScintilla is not None and isinstance(widget, QsciScintilla):
+            styleCodeEditor(widget, widget.lexer())
+        if getattr(widget, '_theme_icon', None) is not None:
+            _renderLabelIcon(widget)
+        handler = getattr(widget, 'onThemeChanged', None)
+        if callable(handler):
+            try:
+                handler()
+            except Exception as e:    # one widget must not stop the others
+                import logging
+                logging.getLogger(__name__).warning(f"{type(widget).__name__} did not follow the theme: {e}")
+        widget.update()
+
+
+def _saveThemeSetting(name: str):
+    try:
+        import data
+        if data.configuration is None:
+            return
+        data.configuration['theme'] = name
+        if data.configuration_manager:
+            data.configuration_manager.saveConfiguration()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Cannot save the theme in the configuration: {e}")
+
+
+def setLabelIcon(label: QLabel, label_icon: QIcon, size) -> QLabel:
+    """Show ``label_icon`` in ``label``; the picture is redrawn when the theme changes."""
+    label._theme_icon = (label_icon, size if isinstance(size, QSize) else QSize(size, size))
+    _renderLabelIcon(label)
+    return label
+
+
+def _renderLabelIcon(label: QLabel):
+    label_icon, size = label._theme_icon
+    label.setPixmap(label_icon.pixmap(size, label.devicePixelRatioF()))

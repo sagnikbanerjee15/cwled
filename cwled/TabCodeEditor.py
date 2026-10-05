@@ -121,7 +121,7 @@ class CodeWindow( QWidget):
         self.fileuri_text.setMinimumWidth(200)
         self.fileuri_text.setWordWrap(False)
         self.fileuri_text.setTextFormat(Qt.TextFormat.RichText)
-        self.fileuri_text.setStyleSheet(f"QLabel {{ background-color: {theme.INPUT_BG}; padding: 3px; border: 1px solid {theme.INPUT_BORDER}; border-radius: 2px; }}")
+        self.fileuri_text.setObjectName('fileUri')     # styled in theme.STYLE_SHEET
         # Set size policy to expand horizontally
         # (Ignored: a long URI must not set the minimum width of the window; the label stretches anyway)
         self.fileuri_text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
@@ -645,6 +645,9 @@ class CodeWindow( QWidget):
         # Update the fileuri text box
         self.updateFileuriDisplay()
     
+    def onThemeChanged(self):
+        self.updateFileuriDisplay()
+
     def updateFileuriDisplay(self):
         """
         Update the fileuri display with colorized parts: scheme (orange), directory (blue), filename (red).

@@ -25,6 +25,9 @@ llm:
   temperature: 0.1
   max_tokens: 4096
   api_key_env: GOOGLE_API_KEY
+# Colour theme: Composer Dark, Light, Midnight, Nord or Solarized Light
+# (View > Theme switches it while CWLed runs)
+theme: Composer Dark
 # Default size and font for the application
 main_window:
   initial_width: 1400

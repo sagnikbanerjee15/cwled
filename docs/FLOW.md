@@ -807,6 +807,31 @@ Graph emits editingFinished
 [Normal update cycle continues]
 ```
 
+## Themes
+
+**Location**: `theme.py`
+
+The colours are module level constants of `theme.py` (roles named after Composer's palette:
+`BODY_BG`, `PANEL_BG`, `TEXT`, `TEXT_MUTED`, `SKY`, `BLACK` for borders...), plus the `EDITOR`
+(code editor) and `GRAPH` (workflow graph) dictionaries. `theme.THEMES` gives every role a value
+for each theme (Composer Dark, Light, Midnight, Nord, Solarized Light).
+
+`theme.setTheme(name)` (View > Theme, the status bar brush, the Configuration dialog):
+```
+replace the constants, EDITOR and GRAPH with the theme's values
+    ↓
+re-apply the Qt palette and the application style sheet (theme.STYLE_SHEET)
+    ↓
+for every widget: restyle QsciScintilla editors, redraw labels set with
+theme.setLabelIcon(), call widget.onThemeChanged() if it has one
+(graphs: GraphItems.retheme, command line preview, step inspector, ...)
+    ↓
+save the name in the configuration (`theme`) and emit theme.notifier.themeChanged
+```
+Icons made by `theme.icon()` remember the role of their colour and repaint themselves. Widgets
+should take their colours from the style sheet (object names / properties) or read `theme.X`
+when they paint; a widget that builds colours into its content implements `onThemeChanged()`.
+
 ## Graph Visualization
 
 ### CWLGraph

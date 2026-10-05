@@ -564,7 +564,7 @@ class AppInfoTab(_Page):
             self.main.addWidget(line)
         description = _text(getattr(tool, 'doc', None))
         title = QLabel(f"Description{'' if description else ':'}", self)
-        title.setStyleSheet(f"color: {theme.LIGHT_GRAY};")
+        title.setProperty('muted', True)
         self.main.addWidget(title)
         if description:
             text = QLabel(self)
@@ -1349,3 +1349,7 @@ class StepInspector(QFrame):
             self.close_inspector()
             return
         super().keyPressEvent(event)
+
+    def onThemeChanged(self):
+        if self.isVisible() and self.node() is not None:
+            self.rebuild()

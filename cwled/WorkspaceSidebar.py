@@ -5,17 +5,73 @@ The left panel of a window: the application title above the "Workspace" and
 The main window and every window that tabs were torn off into have one. Each
 shows the folders of the workspace of its window.
 """
+import re
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 
 from PyQt6.QtCore import QMimeData, QSize, Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QHBoxLayout, QLabel,
-                             QListWidget, QListWidgetItem, QStackedWidget, QTabBar,
+                             QListWidget, QListWidgetItem, QStackedWidget, QStyle,
+                             QStyledItemDelegate, QStyleOptionViewItem, QTabBar,
                              QVBoxLayout, QWidget)
 
 import theme
 from WorkspaceContents import WorkspaceContents
+
+
+ROLE_FOLDER = Qt.ItemDataRole.UserRole + 1
+_CLASS_PATTERN = re.compile(r'^\s*["\']?class["\']?\s*:\s*["\']?([A-Za-z]+)')
+_CLASS_ICONS = {'Workflow': 'workflow', 'CommandLineTool': 'tool', 'ExpressionTool': 'expressiontool'}
+
+
+def documentClass(file_path: str) -> Optional[str]:
+    """The CWL class of a document (Workflow, CommandLineTool...), from its first lines."""
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as handle:
+            for number, line in enumerate(handle):
+                match = _CLASS_PATTERN.search(line)
+                if match and match.group(1) in _CLASS_ICONS:
+                    return match.group(1)
+                if number > 400:
+                    break
+    except OSError:
+        pass
+    return None
+
+
+def _folderHint(file_path: str) -> str:
+    """The last two folders of a path, as Composer shows under a file name."""
+    parts = Path(file_path).parent.parts
+    return "/".join(parts[-2:]) if len(parts) > 1 else str(Path(file_path).parent)
+
+
+class _RecentItemDelegate(QStyledItemDelegate):
+    """A recent file: its name, then its folder in the muted colour."""
+
+    def paint(self, painter, option, index):
+        folder = index.data(ROLE_FOLDER)
+        if not folder:
+            return super().paint(painter, option, index)
+        item = QStyleOptionViewItem(option)
+        self.initStyleOption(item, index)
+        name, item.text = item.text, ""
+        widget = item.widget
+        style = widget.style() if widget is not None else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, item, painter, widget)
+        rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, item, widget)
+        metrics = item.fontMetrics
+        name = metrics.elidedText(name, Qt.TextElideMode.ElideMiddle, rect.width())
+        align = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+        selected = bool(item.state & QStyle.StateFlag.State_Selected)
+        painter.save()
+        painter.setPen(QColor(theme.WHITE if selected else theme.TEXT))
+        painter.drawText(rect, align, name)
+        rest = rect.adjusted(metrics.horizontalAdvance(name) + 10, 0, 0, 0)
+        if rest.width() > 24:
+            painter.setPen(QColor(theme.TEXT_MUTED))
+            painter.drawText(rest, align, metrics.elidedText(folder, Qt.TextElideMode.ElideLeft, rest.width()))
+        painter.restore()
 
 
 class RecentFilesList(QListWidget):
@@ -26,6 +82,9 @@ class RecentFilesList(QListWidget):
         super().__init__()
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.setItemDelegate(_RecentItemDelegate(self))
 
     def mimeData(self, items):
         mime_data = QMimeData()
@@ -38,9 +97,12 @@ class RecentFilesList(QListWidget):
         self.clear()
         files = list(files)
         for file_path in files:
-            item = QListWidgetItem(theme.icon('file-o', color=theme.SMOKE), Path(file_path).name)
+            icon_key = _CLASS_ICONS.get(documentClass(file_path))
+            item_icon = theme.icon(icon_key) if icon_key else theme.icon('file-o', color=theme.SMOKE)
+            item = QListWidgetItem(item_icon, Path(file_path).name)
             item.setToolTip(str(file_path))
             item.setData(Qt.ItemDataRole.UserRole, str(file_path))
+            item.setData(ROLE_FOLDER, _folderHint(file_path))
             self.addItem(item)
         if not files:
             placeholder = QListWidgetItem("No recent files")
