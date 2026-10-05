@@ -24,6 +24,8 @@ The architecture of CWLed is designed for flexibility, catering to both visual-o
 - [Main Window](#main-window)
   - [Side Panel](#side-panel)
   - [Document Tabs](#document-tabs)
+  - [Detached Windows](#detached-windows)
+  - [Comparing Documents](#comparing-documents)
   - [Welcome Tab](#welcome-tab)
   - [Status Bar](#status-bar)
 - [Command Line tool Editor](#command-line-tool-editor)
@@ -103,7 +105,7 @@ options:
 
 ![Main application window](./main_window.png)
 
-CWLed runs in a single main window, laid out like the Rabix Composer editor that inspired it. The window has four areas:
+CWLed's main window is laid out like the Rabix Composer editor that inspired it. Document tabs can also be [detached](#detached-windows) into windows of their own, for example to compare two workflows side by side. The window has four areas:
 
 - the **side panel** on the left, with the *Workspace* and *Recent* file lists;
 - the **document tabs** across the top, one tab per open document plus the *Welcome* tab;
@@ -126,7 +128,11 @@ The side panel lists the CWL documents of your workspace. Use the *Workspace* an
 
 *Sort by name* / *Sort by date modified*: The two buttons next to the search field sort the tree. Clicking the same button again reverses the order.
 
-*Rescan*: Re-reads the workspace folders, for example after files were added outside CWLed.
+*Rescan*: Re-reads the workspace folders. The list also updates by itself, a moment after files are added, removed or renamed in a folder that is expanded, and keeps the folders that are expanded, the selection and the scroll position.
+
+*Hidden folders*: Folders whose name starts with a dot, such as the `.steps` folder that **Repackage workflow with all tools** writes, are not listed. The eye button below the search field shows them. Showing a file of a hidden folder (see [Show a Step's File](#visual-editor-tab-1)) turns it on. Version control and cache folders (`.git`, `__pycache__`, `node_modules`, virtual environments) are never listed.
+
+*Follow the open document*: The target button next to the eye button (on by default) selects the file of the document you are working on in the list, when you switch tabs and when a document is opened or saved with another name. It leaves alone the *Recent* list, a search in progress and any folder you hid, and it does not take the selection back from you while you edit.
 
 *Recent*: The files you opened most recently, newest first. Double-click an entry to open it.
 
@@ -136,9 +142,48 @@ You can also drag a CWL file from the Workspace tree (any of its folders) onto a
 
 Every document you open or create gets its own tab. The tab shows the document type icon and the file name (or the document ID for documents that have not been saved yet). A leading `*` in the tab title means the document has unsaved changes. Hover over a tab to see the full path and CWL version of the document.
 
-- Click a tab to switch to that document. Tabs can be dragged to reorder them.
+- Click a tab to switch to that document. Tabs can be dragged to reorder them, or dragged out of the tab bar to [detach](#detached-windows) them into a window of their own.
 - Click the × on a tab, or use **File → Close tab**, to close a document. If it has unsaved changes you are asked whether to save them first.
 - The **+** button at the right end of the tab bar opens the Welcome tab again if you closed it.
+
+## Detached Windows
+
+To work on several documents at once, for example to compare two workflows, drag a document tab away from the tab bar. The tab leaves the main window for a window of its own, which follows the mouse until you release the button. Drop it anywhere on the screen, next to the main window or on another monitor.
+
+A detached window looks like the main window: it has the **side panel** with a workspace on the left, its own **menu bar**, and the **document tabs** and **status bar**. You can open more files in it from its side panel, create new documents with **File → New**, or drag more tabs into it. Documents can be edited, saved and closed in any window, and a file that is already open is never opened twice: opening it again brings its tab to the front, in whichever window it is.
+
+*Reattaching*: To put a tab back, drag it onto the tab bar of the main window (or of any other window): a blue marker shows where it will land. The window it came from goes away once it has no tab left. Without the mouse, you can right-click a tab and choose **Move to New Window** or **Move to** *another window*, click the button at the right end of the tab bar of a detached window to move all its tabs back to the main window, or choose **Window → Reattach All Tabs to the Main Window**. The only tab of a detached window cannot be torn off again: dragging it moves the window.
+
+*While dragging*: Press Esc to cancel: the tab goes back where it came from (a window that was moved goes back to its place). Drop the window with the pointer at the left or right edge of the screen to make it fill that half of the screen. **Window → Tile Windows Side by Side** (shown while there are detached windows) arranges the main window and the detached ones in a row across the screen; windows that cannot be that narrow overlap a little.
+
+*Link workflow views*: To compare two workflows (or two versions of one), show them in two windows and turn on **Window → Link Workflow Views**, or the link button next to the zoom buttons of the canvas. Panning or zooming one graph then does the same in the graphs of the other windows, by the same amount on the screen, so they stay aligned. Fitting a graph to its window and moving nodes are not linked.
+
+*Workspaces*: Each window has a workspace of its own. A detached window starts with a copy of the workspace folders of the window its tab came from, and the folder of the document is the one you work in. Adding or removing folders in a detached window does not change the workspace of the main window (nor what is remembered between sessions). When a tab moves to another window, **the workspaces are merged**: the folders of the window the tab came from are added to the workspace of the window it goes to (folders that are already there, or inside a folder there, are skipped), so the folders you opened while a window was detached are not lost. The workspace of a detached window that you close instead is dropped.
+
+*Closing*: Closing a detached window closes its documents, asking to save any unsaved changes first. Closing the main window, or quitting, closes every window.
+
+*Next time*: The documents you had open, the windows tabs were torn off into, their positions and sizes and their workspaces are opened again at the next start (documents that were never saved, and files that are gone, are not). Turn this off with *Reopen the documents and windows of the last session at start* in the [General tab of the configuration](#general-tab).
+
+The Welcome tab always stays in the main window.
+
+## Comparing Documents
+
+**Tools → Compare with...**, or **Compare with...** in the menu of a document's tab (right-click it), compares the document with another one and shows the differences in a new tab. You choose what to compare with:
+
+- another document that is open (in any window);
+- **The saved version of this document**, to see the changes that are not saved yet;
+- a revision of the file in **git** (the last eight commits that changed it, when the file is in a git repository);
+- **A file...** that you pick.
+
+The other document is shown on the left and yours on the right. Both are brought to the same form before they are compared, however they were written (as the Code tab shows them, without the address of the file), so only real differences are shown.
+
+- The two texts are side by side, line by line, and scroll together. Lines that differ are coloured (green: only on the right, red: only on the left, amber: different) and a gap faces a line that has no counterpart.
+- The list on the left names the **parts that changed**: inputs, outputs, steps, requirements and hints (by id or class) and the other fields. Click an entry to go to it.
+- The arrow buttons go to the previous and the next difference.
+- For two workflows, **Mark the steps in the graphs** puts a halo around the steps that differ in the Visual Editor of the documents that are open: green for added steps, red (dashed) for removed ones and amber for changed ones. The marks are removed when the comparison tab is closed.
+- **Swap the sides** exchanges them; **Compare again** reads the documents and files again, with the changes you made since.
+
+A comparison is a tab like any other: it can be torn off into a window of its own, for example next to the workflows it compares. It is not saved with the session.
 
 ## Welcome Tab
 
@@ -311,14 +356,15 @@ This generated text is then inserted into the documentation box. This feature is
 
 This is the main graphical editor and the most important feature of the workflow editor. It provides an interactive canvas where you can visually construct your pipeline.
 
-*Graph View*: The workflow is drawn the way Rabix Composer draws it. Each step is a circle inside a grey ring: teal, or purple when the step is conditional (it has a `when` expression), with a `>_` icon for command line tools and a branching icon for sub-workflows. Workflow inputs (on the left) and outputs (on the right) are light grey circles, dark grey when optional, with an arrow icon, or a file icon for `File` and `File[]` parameters. Each node's label is shown under it. The legend above the canvas summarizes the colours.
+*Graph View*: The workflow is drawn the way Rabix Composer draws it. Each step is a circle inside a grey ring: teal, or purple when the step is conditional (it has a `when` expression), with a `>_` icon for command line tools and a branching icon for sub-workflows. Workflow inputs (on the left) and outputs (on the right) are light grey circles, dark grey when optional, with an arrow icon, or a file icon for `File` and `File[]` parameters. Each node's label is shown under it.
 *Nodes and Ports*: Ports are the small dots on a node's ring, inputs on the left and outputs on the right. Hover a node to see the names of its ports. As in Composer, a step only shows the ports of its required `File` and `Directory` inputs and of the inputs that are connected; show the port of any other input from the [step inspector](#step-inspector). Drag from an output port to an input port to connect them; drag a port to an empty part of the canvas to create a workflow input or output connected to it. Hover a connection to see which ports it joins.
 *Selection*: Click a node to select it: its ring turns teal and everything not connected to it fades. Click a connection to select it and show the names of the ports at its ends. Click the empty canvas to clear the selection, or press Delete to delete what is selected.
-*Canvas buttons*: The buttons at the bottom right of the canvas delete the selection (shown only while something is selected), zoom in and out, fit the whole workflow in the view, auto-arrange the graph and export it as an SVG, PNG or JPEG image. The mouse wheel also zooms; node labels grow as you zoom out so they stay readable.
-*Add Step*: Adds a step that runs an existing CWL tool or workflow file. As in Composer, you can also drag a tool or a workflow from the side panel (*Workspace* or *Recent*), or from your file manager, onto the canvas: it becomes a step where you drop it (a workflow becomes a sub-workflow step and the *SubworkflowFeatureRequirement* is added). Files can also be dropped on the *Drop CWL files here* area.
-*Duplicate Step*: Adds a copy of the selected step.
+*Moving the Canvas*: Press the left mouse button on an empty part of the canvas and drag to move the view, for example after zooming in; the nodes keep their places in the workflow. Dragging a node or a port works as before. Holding **Space** makes a drag move the canvas wherever it starts, even on a node. Scrolling with two fingers on a trackpad moves the canvas, and **Cmd/Ctrl + scroll** or a pinch zooms; the wheel of a mouse zooms. With the canvas selected, the arrow keys move it (hold Shift to move four times as far), **+** and **-** zoom and **0** fits the whole workflow in the view. To select several nodes, hold Shift while you drag a rectangle on the empty canvas, or Shift-click the nodes. Alt + left button and the middle button also move the canvas.
+*Canvas buttons*: The buttons at the bottom right of the canvas delete the selection (shown only while something is selected), zoom in and out, fit the whole workflow in the view, auto-arrange the graph and export it as an SVG, PNG or JPEG image. The mouse wheel also zooms; node labels grow as you zoom out so they stay readable. The link button links the view of this graph to the graphs of the other windows (see [Detached Windows](#detached-windows)).
+*Adding Steps*: Drag a tool or a workflow from the side panel (*Workspace* or *Recent*), or from your file manager, onto the canvas: it becomes a step where you drop it (a workflow becomes a sub-workflow step and the *SubworkflowFeatureRequirement* is added). The canvas fills the whole editor: there is no toolbar above it.
 *Workflow Inputs/Outputs*: You can define the overall inputs and outputs of the entire workflow. This is typically done by "promoting" an input or output from a specific step, making it part of the workflow's public interface.
-*Step Configuration*: Double-clicking a step opens it in the [step inspector](#step-inspector) on the right of the canvas. Double-clicking a workflow input or output opens its [InputDialog](#inputdialog) or [OutputDialog](#outputdialog).
+*Show a Step's File*: Click the **name** of a step (the label under its circle, which is underlined when you point at it) to show the file of the tool or sub-workflow it runs in the *Workspace* side panel of the window: the folders down to the file are expanded and the file is selected. Only the name does this: clicking the circle selects the step, and dragging the name moves the step as usual. A step that is defined inside the workflow shows the workflow's own file. A file that is not in a workspace folder of the window is reported in the status bar. This only moves the selection of the panel; it does not change the folder new files are saved in. **Cmd/Ctrl + click** on the name opens the step instead: the file of its tool or sub-workflow in a tab of the window (or in its tab if it is already open), or, for a step that is defined inside the workflow, its definition in the Code tab with the step selected.
+*Step Configuration*: Double-clicking a step (its circle or its name) opens it in the [step inspector](#step-inspector) on the right of the canvas, which stays hidden until then. Double-clicking a workflow input or output opens its [InputDialog](#inputdialog) or [OutputDialog](#outputdialog).
 
 ### Step Inspector
 
@@ -430,6 +476,7 @@ The Configuration dialog allows you to customize various aspects of the applicat
 This tab contains basic application settings.
 *   **Application Name**: The name of the application as displayed in the title bar.
 *   **Default CWL Version**: Select the default CWL version to be used when creating new tools or workflows.
+*   **Reopen the documents and windows of the last session at start**: When on (the default) the documents that were open when you quit, the windows tabs were torn off into and their positions are restored at the next start.
 *   **Window Size**: Set the initial width and height of the main application window. The window is never opened larger than the screen.
 
 ## Logging Tab
@@ -457,7 +504,7 @@ This tab provides options for formatting identifiers.
 
 # Menu Options
 
-The application provides four menus: **File**, **Tools**, **Window** and **Help**. On macOS they are in the system menu bar at the top of the screen; on Linux they are at the top of the main window. Commands that act on a document apply to the document whose tab is selected.
+The application provides four menus: **File**, **Tools**, **Window** and **Help**. On macOS they are in the system menu bar at the top of the screen; on Linux they are at the top of the window. [Detached windows](#detached-windows) have the same menus. Commands that act on a document apply to the document whose tab is selected in the window you use them in, and new documents open in that window.
 
 ## File Menu
 
@@ -502,6 +549,8 @@ The application provides four menus: **File**, **Tools**, **Window** and **Help*
 
 - **Draft CommandLineTool from documentation**: Opens a dialog where you can paste help text or documentation from a command-line tool. The application uses an LLM (Large Language Model) to automatically generate a CWL CommandLineTool definition based on the provided text. The generated file is saved with a `_draft_` prefix and opens in a new document tab for further editing.
 
+- **Compare with...**: Compares the current document with another document, its saved version, a revision in git or a file (see [Comparing Documents](#comparing-documents)).
+
 - **Troubleshoot tool/workflow**: Opens an LLM-assisted troubleshooting flow for the currently active CWL document. You provide an issue description, and the application returns guidance in a dedicated response dialog.
 
 
@@ -509,9 +558,12 @@ The application provides four menus: **File**, **Tools**, **Window** and **Help*
 
 The Window menu lists all open documents. Each entry shows the document type and its label or ID.
 
-Clicking an entry brings that document's tab to the front. This is useful when you have many documents open and their tabs no longer fit in the tab bar.
+Clicking an entry brings that document's tab to the front, in whichever window it is. This is useful when you have many documents open and their tabs no longer fit in the tab bar.
 
-- **Main Window**: Brings the CWLed window to the front.
+- **Main Window**: Brings the main CWLed window to the front.
+- **Reattach All Tabs to the Main Window**: Moves the tabs of every [detached window](#detached-windows) back to the main window, merging their workspaces. It is shown while there are detached windows.
+- **Tile Windows Side by Side**: Arranges the windows in a row across the screen. It is shown while there are detached windows.
+- **Link Workflow Views**: Panning or zooming a workflow does the same in the workflows of the other windows (see [Detached Windows](#detached-windows)).
 
 ## Help Menu
 
