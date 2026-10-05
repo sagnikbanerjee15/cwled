@@ -94,6 +94,27 @@ def parseArgs():
     return args 
 
 
+def nameNewDocument(window, window_id, name):
+    """
+    Give the document that `window.add_window_to_menu` just created the name
+    received on the command line. The name is the id of the CWL tool, so it is
+    shown in the info tab, the code editor and in the tab and window titles.
+
+    The name is part of the new document rather than an edit of it, so the
+    document is not reported as modified (no `*` in the titles).
+
+    Args:
+        window: the MainWindow that created the document
+        window_id: the id returned by `window.add_window_to_menu`
+        name (str): the name (CWL id) of the new document
+    """
+    document = window.open_windows[window_id]
+    document.cwl_tool.id = name
+    document.onUpdateCWL()  # push the new id to all the tabs
+    document._mark_clean_snapshot()  # the named document is the baseline for changes
+    document.updateWindowTitle()
+
+
 def main():
     builtins.labelWidth = 100
     data.script_directory=Path(__file__).resolve().parent
@@ -196,29 +217,23 @@ def main():
         logger.info(f"\u23F3 Creating a new workflow with name: {args.new_workflow}")
         # Create a new workflow child window
         child_window_id = window.add_window_to_menu('Workflow')
-        # If a name was provided, set it in the CWL dictionary
+        # If a name was provided, set it as the id of the new document
         if args.new_workflow != "":
-            active_window = window.open_windows[child_window_id]
-            active_window.cwl_dict['id'] = args.new_workflow
-            active_window.updateWindowTitle()
+            nameNewDocument(window, child_window_id, args.new_workflow)
     elif args.new_commandline:
         logger.info(f"\u23F3 Creating a new command line tool with name: {args.new_commandline}")
         # Create a new CommandLineTool child window
         child_window_id = window.add_window_to_menu('CommandLineTool')
-        # If a name was provided, set it in the CWL dictionary
+        # If a name was provided, set it as the id of the new document
         if args.new_commandline != "":
-            active_window = window.open_windows[child_window_id]
-            active_window.cwl_dict['id'] = args.new_commandline
-            active_window.updateWindowTitle()
+            nameNewDocument(window, child_window_id, args.new_commandline)
     elif args.new_expression:
         logger.info(f"\u23F3 Creating a new expression tool with name: {args.new_expression}")
         # Create a new ExpressionTool child window
         child_window_id = window.add_window_to_menu('ExpressionTool')
-        # If a name was provided, set it in the CWL dictionary
+        # If a name was provided, set it as the id of the new document
         if args.new_expression != "":
-            active_window = window.open_windows[child_window_id]
-            active_window.cwl_dict['id'] = args.new_expression
-            active_window.updateWindowTitle()
+            nameNewDocument(window, child_window_id, args.new_expression)
     elif not args.input_file:
         # If no specific action was requested, do nothing
         pass
