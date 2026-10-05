@@ -32,5 +32,5 @@ def inspect(app):
 
 
 QApplication.exec = inspect
-sys.argv = ['cwled'] + sys.argv[1:]
+sys.argv = ['cwled', '--no-splash'] + sys.argv[1:]
 cwled_main.main()

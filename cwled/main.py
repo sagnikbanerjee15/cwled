@@ -17,6 +17,7 @@ from logger import pinThirdPartyLoggers
 from CWLtoolFactory import CWLRunner
 from helperFunctions import getResourcePath
 import theme
+import SplashScreen
 # setup the logging root.
 # all subsequent loggers will be children of this.
 logger=colorlog.getLogger('main')
@@ -87,6 +88,11 @@ def parseArgs():
                         action='store_true',
                         dest='reset_config',
                         help='Reset user config to defaults before startup.')
+    parser.add_argument('--no-splash',
+                        action='store_true',
+                        dest='no_splash',
+                        help='Do not show the logo while the application starts '
+                             '(also: show_splash in the configuration, or CWLED_NO_SPLASH in the environment).')
     # parser.add_argument('--config', help='Location of the configuration file', type=str, default=None)
     # Parse the arguments
     # Parse the arguments
@@ -135,8 +141,9 @@ def main():
         print(getToolVersion())
         sys.exit(0)
 
-    # Let's define the app
-    app = QApplication(sys.argv)
+    # Let's define the app (the logo that shows while it starts may have created it already, see SplashScreen)
+    app = QApplication.instance() or QApplication(sys.argv)
+    SplashScreen.progress("Loading the configuration", 0.45)
     # Set application attributes before creating widgets
     app.setAttribute(Qt.ApplicationAttribute.AA_DontShowIconsInMenus, False)
     app.setAttribute(Qt.ApplicationAttribute.AA_NativeWindows, False)
@@ -165,6 +172,7 @@ def main():
     app.setFont(theme.uiFont(font_family, int(data.configuration.get('main_window').get('font_size'))))
     
     # Rabix Composer look and feel (dark theme, Fusion based so it is identical on every OS)
+    SplashScreen.progress("Applying the theme", 0.6)
     theme.applyTheme(app)
 
 
@@ -185,11 +193,13 @@ def main():
             except Exception as e:
                 logger.error(f"\u274C Failed to create workspace directory: {e}")
     # Store the workspace folders in the data module to make them available application-wide
+    SplashScreen.progress("Preparing the workspace", 0.72)
     workspaceFolders.initialise(workspace_path)
     
     logger.info(f"\u2139 Changing working directory to workspace: {data.workspace_directory}")
 
     # check the tools 
+    SplashScreen.progress("Checking the CWL tools", 0.82)
     try:
         f=CWLRunner()
         logger.info("\u2139 All tools available: ")
@@ -209,8 +219,10 @@ def main():
         for x in f:logger.info(f"\u2139 Working with {str(x)} file")
     os.chdir(str(data.workspace_directory))
     # Create the main window
+    SplashScreen.progress("Opening the window", 0.9)
     window = MainWindow(f,ei)
     window.show()
+    SplashScreen.finish(window)      # the logo goes away now that the window is there
     
     # Handle command line arguments for creating new workflow/tools
     if args.new_workflow:

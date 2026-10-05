@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QHBoxLayout, QLabe
                              QStyledItemDelegate, QStyleOptionViewItem, QTabBar,
                              QVBoxLayout, QWidget)
 
+import logo
 import theme
 from WorkspaceContents import WorkspaceContents
 
@@ -137,7 +138,11 @@ class WorkspaceSidebar(QWidget):
         title_bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         title_bar.setFixedHeight(theme.ACTION_BAR_HEIGHT)
         title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setContentsMargins(14, 0, 0, 0)
+        title_layout.setSpacing(-4)             # the title has a padding of its own (see theme.STYLE_SHEET)
+        mark = QLabel(title_bar)                # the logo, before the name
+        mark.setPixmap(logo.markPixmap(30, tile=False))
+        title_layout.addWidget(mark)
         app_title = QLabel(
             f'<span style="font-family:\'{theme.TITLE_FONT_FAMILY}\'">CWL</span>'
             f'<span style="font-family:\'{theme.TITLE_FONT_FAMILY}\'; font-weight:300">ed</span>'
@@ -147,6 +152,7 @@ class WorkspaceSidebar(QWidget):
         title_font.setPointSizeF(QApplication.font().pointSizeF() + 2)
         app_title.setFont(title_font)
         title_layout.addWidget(app_title)
+        title_layout.addStretch(1)
         layout.addWidget(title_bar)
 
         # Panel selector (Composer: "My Projects | Public Apps")

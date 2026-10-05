@@ -11,6 +11,7 @@
 - [Data Flow Patterns](#data-flow-patterns)
 - [Dialog System](#dialog-system)
 - [Remote Folders](#remote-folders)
+- [Starting the Application](#starting-the-application)
 - [Graph Visualization](#graph-visualization)
 
 ## Overview
@@ -863,6 +864,26 @@ machine (MirrorIndex); with it, and from a complete answer only, _Puller.prune()
 ```
 
 `Transport` runs a shell script on a machine: `SshTransport` is the `ssh` program (`BatchMode`, so it never asks for a password), `LocalTransport` runs the same scripts in a local shell, which is what the tests do (`pytests/test_remote_folders.py`). The list is kept in the configuration as `remote_folders` (`host`, `path`, `mirror`, `synced`); the copies live under `platformdirs.user_data_path('cwled')/remote/<host>/<path>`.
+
+## Starting the Application
+
+**Location**: `cwled.py`, `SplashScreen.py`, `logo.py`, `main.py`
+
+```
+cwled.py
+    ↓
+SplashScreen.start()      (only Qt and the logo are imported: the window is there at once)
+    ├─ wanted(): not with --no-splash/--version/--help, CWLED_NO_SPLASH, the offscreen platform or show_splash: false
+    └─ creates the QApplication (kept in SplashScreen._app), shows LaunchSplash: logo.paintMark() + name + bar
+    ↓
+from main import main     (imports everything else: a few seconds)
+    ↓
+main.main(): SplashScreen.progress("Loading the configuration" ... "Opening the window")  → the bar
+    ↓
+MainWindow(...).show() → SplashScreen.finish(window)   (stays at least a second, fades out)
+```
+
+`logo.markSvg()` is the one description of the mark: `QSvgRenderer` paints it in the application and `resources/logo/make_logo.py` writes the files from it.
 
 ## Themes
 

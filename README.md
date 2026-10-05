@@ -1,6 +1,6 @@
 
 <p align="center">
-  <img src="resources/icons/CWL-Logo.png" alt="CWLed Logo" width="150">
+  <img src="resources/logo/cwled-mark-1024.png" alt="CWLed Logo" width="150">
 </p>
 
 <h1 align="center">CWLed</h1>
@@ -107,7 +107,7 @@ usage: cwled.py [-h] [--input-file INPUT_FILE [INPUT_FILE ...]]
                 [--new-workflow NEW_WORKFLOW]
                 [--new-commandline NEW_COMMANDLINE]
                 [--new-expression NEW_EXPRESSION]
-                [--workspace WORKSPACE] [--version]
+                [--workspace WORKSPACE] [--version] [--no-splash]
 
 options:
   -h, --help            Show this help message and exit
@@ -119,6 +119,7 @@ options:
                         Create a new ExpressionTool
   --workspace DIR       Default location for CWL tools
   --version             Show the version of the tool
+  --no-splash           Do not show the logo while the application starts
 ```
 
 ### Quick start

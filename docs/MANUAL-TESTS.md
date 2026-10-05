@@ -11,7 +11,7 @@ Each item reads: *what to do* → *what should happen*. Tick it when it does. No
 ## How to use this list
 
 1. Start with section **A** (things only real hardware can confirm), then go through the sections of
-   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, **O** the remote folders over SSH (only on the `ssh-remote-folders` branch), and **T** the tests and documentation.
+   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, **O** the remote folders over SSH (only on the `ssh-remote-folders` branch), **P** the logo that shows at the start, and **T** the tests and documentation.
 2. Use a scratch copy of the test documents, so that saving never touches the repository (outside the temporary directory, see below):
 
    ```bash
@@ -650,6 +650,23 @@ Back up `~/.ssh/config` before editing it for these checks.
 - [ ] **O-22** A workflow in the remote folder whose steps are other files of the same remote folder (`run: tools/x.cwl`) opens with its steps (see **O-32**: the tools are copied when it is opened), and clicking the name of a step reveals the tool in the remote root (section **D**).
 - [ ] **O-23** All five themes: the dialog, the hosts table, the red error line and the server icon of the root are readable in each (View → Theme).
 - [ ] **O-24** `remote_folders` in the user configuration file lists the folders (host, path, mirror, synced); delete the entry by hand and start again → the root keeps its folder but is no longer named `host:/path` and no longer uploads.
+
+## P. The logo and the window that shows while CWLed starts
+
+Only on a real screen can you tell whether it looks right and whether it comes up in time; the automated tests check the pixels, the order of the steps and the settings.
+
+- [ ] **P-01** 🖥 Start CWLed from the terminal (`uv run ./cwled.py`) → within a second a window with the logo shows in the middle of the screen: a **W** of five nodes (light ports at the ends, teal and purple steps, raspberry edges), the name **CWLed**,
+      *COMMON WORKFLOW LANGUAGE EDITOR*, a bar and the version at the bottom right. It is there **before** the long wait for the libraries, not after it.
+- [ ] **P-02** 🖥 The bar fills while the messages change (*Loading the configuration → Applying the theme → Preparing the workspace → Checking the CWL tools → Opening the window → Ready*). The window stays at least a second, fades out and the main window is in front.
+      The corners of the logo window are rounded and see-through (no black corners), also on a second monitor and on a retina screen (sharp, not blurred).
+- [ ] **P-03** 🖥 The logo window does not hide an error dialog or the main window: start with a broken tool path (or a workspace folder that cannot be created) → the error is readable.
+- [ ] **P-04** `uv run ./cwled.py --no-splash` → no logo window. Same with `CWLED_NO_SPLASH=1 uv run ./cwled.py`. `--version` and `--help` print and exit, without any window.
+- [ ] **P-05** **Tools → Configuration → General**: *Show the logo while CWLed starts* is ticked; untick it, press OK, restart → no logo window; `show_splash: false` is in the configuration file. Tick it again → the logo is back.
+- [ ] **P-06** 🖥 Start CWLed with a file (`uv run ./cwled.py tests/echo.cwl`) and with `--new-workflow Demo` → the logo shows, then the main window with the document, as usual.
+- [ ] **P-07** 🖥 The title of the side panel has the small mark before **CWLed**, aligned with the name and sharp, in all five themes; the Dock/taskbar icon and the window icon of the application are the mark on its dark rounded square (the old icon, the CWL zigzag with the letters, is gone).
+- [ ] **P-08** 🖥 A packaged build (`make debug-mac`): the application icon in the Finder and the Dock is the new one (`resources/icons/cwled.icns`), and the logo window shows when the packaged application starts.
+- [ ] **P-09** The files in `resources/logo` open in a browser or a vector program: `cwled-mark.svg`, `cwled-mark-plain.svg`, `cwled-logo-dark.svg` (white name, on a dark page) and `cwled-logo-light.svg` (dark name, on a light page); the name is outlines (no font needed).
+      The README shows the mark at its top. `uv run python resources/logo/make_logo.py` changes none of the files (`git status` stays clean).
 
 ---
 

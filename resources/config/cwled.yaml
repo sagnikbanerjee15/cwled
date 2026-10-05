@@ -14,6 +14,8 @@ workspace_folders: []
 remote_folders: []
 # Open the documents (and the windows that tabs were torn off into) of the last session again at start
 restore_session: true
+# Show the logo while the application starts (also --no-splash, or CWLED_NO_SPLASH in the environment)
+show_splash: true
 # What was open when the application was closed (managed by the application)
 session: {}
 # Workspace panel: list the folders whose name starts with a dot; select the open document in the list

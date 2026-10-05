@@ -108,6 +108,11 @@ class ConfigDialog(QDialog):
         self.restore_session_check = QCheckBox("Reopen the documents and windows of the last session at start")
         self.restore_session_check.setChecked(bool(self.config.get('restore_session', True)))
         layout.addWidget(self.restore_session_check)
+
+        # The logo while the application starts
+        self.show_splash_check = QCheckBox("Show the logo while CWLed starts")
+        self.show_splash_check.setChecked(bool(self.config.get('show_splash', True)))
+        layout.addWidget(self.show_splash_check)
         
         # Window size settings
         window_size_group = QGroupBox("Window Size")
@@ -628,6 +633,7 @@ class ConfigDialog(QDialog):
             self.config['default_cwl_version'] = self.default_cwl_version.currentText()
         
         self.config['restore_session'] = self.restore_session_check.isChecked()
+        self.config['show_splash'] = self.show_splash_check.isChecked()
         self.config['theme'] = self.theme_combo.currentText()
         
         # Make sure main_window dictionary exists

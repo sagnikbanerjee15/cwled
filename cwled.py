@@ -44,6 +44,8 @@ if getattr(sys, 'frozen', False) or 'RESOURCEPATH' in os.environ:
         # Add the package directory to sys.path so submodules (main, data, etc.) 
         # can be imported as top-level modules, which the codebase expects
         sys.path.append(os.path.dirname(cwled.__file__))
+        import SplashScreen
+        SplashScreen.start()        # the logo first: importing the rest takes a few seconds
         from main import main
     except ImportError as e:
         # Fallback or error handling
@@ -55,6 +57,8 @@ if getattr(sys, 'frozen', False) or 'RESOURCEPATH' in os.environ:
 else:
     # Add the src directory to the Python path
     sys.path.append(str(Path(__file__).parent / "cwled"))
+    import SplashScreen
+    SplashScreen.start()            # the logo first: importing the rest takes a few seconds
     from main import main
 
 if __name__ == "__main__":

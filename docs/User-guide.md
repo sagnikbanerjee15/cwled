@@ -19,6 +19,7 @@ The architecture of CWLed is designed for flexibility, catering to both visual-o
 - [Integration with LLMs](#integration-with-llms)
 - [Usage](#usage)
 - [Main Window](#main-window)
+  - [The Logo](#the-logo)
   - [Side Panel](#side-panel)
   - [Document Tabs](#document-tabs)
   - [Detached Windows](#detached-windows)
@@ -76,7 +77,7 @@ cd cwled
 ./cwled.py --help
 
 
-usage: cwled.py [-h] [--input-file INPUT_FILE [INPUT_FILE ...]] [--new-workflow NEW_WORKFLOW] [--export-image EXPORT_IMAGE] [--new-commandline NEW_COMMANDLINE] [--new-expression NEW_EXPRESSION] [--workspace WORKSPACE] [--version] [--reset-config]
+usage: cwled.py [-h] [--input-file INPUT_FILE [INPUT_FILE ...]] [--new-workflow NEW_WORKFLOW] [--export-image EXPORT_IMAGE] [--new-commandline NEW_COMMANDLINE] [--new-expression NEW_EXPRESSION] [--workspace WORKSPACE] [--version] [--reset-config] [--no-splash]
 
 options:
   -h, --help            show this help message and exit
@@ -96,6 +97,7 @@ options:
                         workflows cannot be accessed outside the workspace folders.
   --version             Show the version of the tool
   --reset-config        Reset user config to defaults before startup
+  --no-splash           Do not show the logo while the application starts
 
 
 ```
@@ -113,6 +115,14 @@ CWLed's main window is laid out like the Rabix Composer editor that inspired it.
 - the **status bar** at the bottom.
 
 The application uses a dark colour scheme. Tools are marked with a purple `>_` icon, workflows with an orange "share" icon and expression tools with a blue `</>` icon, both in the side panel and on the document tabs.
+
+## The Logo
+
+![The logo window](./splash.png)
+
+While CWLed starts (a few seconds, most of it loading the libraries) a window with its logo shows, with a bar and the name of the step that is being done. It goes away when the main window is there. The logo is a workflow graph that spells the **W** of CWL: the two light nodes at the ends are the input and the output of a workflow, the three coloured ones are its steps, and the raspberry edges are a nod to the zigzag of the Common Workflow Language logo. The same mark is the icon of the application and stands before the name in the title of the [side panel](#side-panel).
+
+The window does not show with `--no-splash`, when the environment variable `CWLED_NO_SPLASH` is set, or when *Show the logo while CWLed starts* is off in the [General tab of the configuration](#general-tab) (`show_splash` in the configuration file). The files of the logo (SVG and PNG, for dark and light backgrounds) are in `resources/logo`.
 
 ## Side Panel
 
@@ -512,6 +522,7 @@ This tab contains basic application settings.
 *   **Default CWL Version**: Select the default CWL version to be used when creating new tools or workflows.
 *   **Theme**: The colour [theme](#themes) of the application. It is applied as soon as you press OK.
 *   **Reopen the documents and windows of the last session at start**: When on (the default) the documents that were open when you quit, the windows tabs were torn off into and their positions are restored at the next start.
+*   **Show the logo while CWLed starts**: When on (the default) the [logo window](#the-logo) shows while the application starts.
 *   **Window Size**: Set the initial width and height of the main application window. The window is never opened larger than the screen.
 
 ## Logging Tab

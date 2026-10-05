@@ -112,3 +112,12 @@ Go to App
  add an input file and verify it is added to the command line. Type File, with secondary files, of certain format.
  add an output file and verify it is added to the command line. Type File, with secondary files, of certain format.
 
+## The logo
+
+The mark is described once, in `cwled/logo.py` (SVG text), and the files of `resources/logo` and the icon of the application (`resources/icons/cwled.png` and `cwled.icns`) are made from it:
+
+```bash
+uv run python resources/logo/make_logo.py
+```
+
+Run it again after changing `cwled/logo.py` (a test fails when the files are not the ones the code describes). The window that shows while the application starts is `cwled/SplashScreen.py`; `cwled.py` starts it before importing the rest, and `main.main()` reports the steps. Turn it off with `--no-splash`, `CWLED_NO_SPLASH=1` or `show_splash: false`.
