@@ -3,6 +3,9 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QLineEdit, QLabel, QPushButton, QHBoxLayout, QScrollArea, QLayout,QMessageBox
 )
 from PyQt6.QtCore import Qt, QSize, QRect, QPoint , QTimer
+import theme
+import logging
+logger = logging.getLogger(__name__)
 
 class Tag(QWidget):
     def __init__(self, text, parent=None):
@@ -21,18 +24,26 @@ class Tag(QWidget):
         # Create the remove button with an "x"
         self.remove_button = QPushButton("x")
         self.remove_button.setFixedSize(16, 16)
-        self.remove_button.setStyleSheet("border: none; background-color: #ff4c4c; color: white; font-weight: bold;")
+        self.remove_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.remove_button.clicked.connect(self.remove_self)
         layout.addWidget(self.remove_button)
 
         # Set layout and appearance
         self.setLayout(layout)
-        self.setStyleSheet("""
-            background-color: #f0f0f0;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            padding: 2px;
-            margin: 0;  # Remove margin here
+        # Composer tag: blue pill with white text
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(f"""
+            Tag {{
+                background-color: {theme.BLUE};
+                border: 1px solid {theme.BTN_PRIMARY_BORDER};
+                border-radius: 2px;
+            }}
+            QLabel {{ color: {theme.WHITE}; background: transparent; border: none; padding: 2px; }}
+            QPushButton {{
+                border: none; background: transparent; color: {theme.WHITE};
+                font-weight: bold; padding: 0;
+            }}
+            QPushButton:hover {{ color: {theme.SMOKE}; background-color: {theme.BTN_PRIMARY_BORDER}; }}
         """)
 
     def remove_self(self):
@@ -181,7 +192,7 @@ class QTagWidget(QWidget):
 
     def add_tag(self, text:str=None):
         # Get the tag from the input field
-        print(f"In add_tag {text}")
+        logger.debug(f"In add_tag {text}")
         if self.tag_counter >= self.max_tags:
             msg_box=QMessageBox(self)
             msg_box.setWindowTitle("Information")
@@ -203,15 +214,15 @@ class QTagWidget(QWidget):
             self.tag_input.clear()
             self._updateCounter()
 
-            print(f"Added new tag { tag }")
+            logger.debug(f"Added new tag { tag }")
  
 
     def tag_removed(self):
         """Update tag counter when a tag is removed"""
-        print(f"Notified that a tag has been deleted. We start with { len(self.getTags() )} tags")
+        logger.debug(f"Notified that a tag has been deleted. We start with { len(self.getTags() )} tags")
         QTimer.singleShot(0, self._updateCounter )  # Process the deletion event
-        print(f"After processing with have { len(self.getTags() ) } tags")
-        print(self)
+        logger.debug(f"After processing with have { len(self.getTags() ) } tags")
+        logger.debug(self)
 
     def _updateCounter(self):
 

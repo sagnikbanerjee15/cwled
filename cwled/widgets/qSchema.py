@@ -13,6 +13,9 @@ from widgets.QCWLedGroupWidget  import QCWLedGroupWidget
 from helperFunctions import getResourcePath
 import data
 
+import theme
+import logging
+logger = logging.getLogger(__name__)
 class QSchemaListGroupWidget(QCWLedGroupWidget):
     """
     A widget that manages a collection of QSchemaList instances representing
@@ -164,8 +167,7 @@ class QSchemaList(QCWLedWidget):
 
         # Create an info button
         self.info_button = QPushButton()
-        icon_path = data.configuration.get('icons').get('info')
-        self.info_button.setIcon(QIcon(str(icon_path)))
+        self.info_button.setIcon(theme.icon('info'))
         self.info_button.setFixedSize(24, 24)
         self.info_button.setFlat(True)
         combo_layout.addWidget(self.info_button)
@@ -287,10 +289,10 @@ class QSchemaList(QCWLedWidget):
                     if row:
                         QSchemaList._schema_data.append(row[:4])
         except FileNotFoundError:
-            print(f"Error: The file {file_path} was not found.")
+            logger.debug(f"Error: The file {file_path} was not found.")
             QSchemaList._schema_data = []
         except Exception as e:
-            print(f"An error occurred: {e}")
+            logger.debug(f"An error occurred: {e}")
             QSchemaList._schema_data = []
 
 

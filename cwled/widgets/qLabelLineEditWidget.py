@@ -1,9 +1,11 @@
+from PyQt6 import sip
 from PyQt6.QtCore import *
 from PyQt6.QtWidgets import *
 from PyQt6.QtGui import QAction, QIcon, QFont, QColor,QFontMetrics
 import json
 import builtins
 import data
+import theme
 import logging
 from sanitizeName import sanitize
 from typing import Union, Any
@@ -22,13 +24,16 @@ class QLabelLineEditWidget(QWidget):
                  placeholder_text="", 
                  objectName="",
                  labelWidth=None,
-                 parent=None):
+                 parent=None,
+                 stacked=False):
         super().__init__(parent)
         # Initialize the QLabel and QLineEdit
         if not labelWidth:
             labelWidth=builtins.labelWidth
+        self.stacked = stacked
         self.label = QLabel(label_text, self)
-        self.label.setFixedWidth(labelWidth)
+        if not stacked:
+            self.label.setFixedWidth(labelWidth)
         self.line_edit = QLineEdit(self)
         if placeholder_text:
             self.setPlaceholderText( placeholder_text=placeholder_text)
@@ -38,8 +43,14 @@ class QLabelLineEditWidget(QWidget):
         
     def initUI( self ):   
         # Create a layout and add the QLabel and QLineEdit to it
+        # (stacked: label above the field, as in Composer forms)
 
-        layout = QHBoxLayout()
+        if self.stacked:
+            layout = QVBoxLayout()
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(6)
+        else:
+            layout = QHBoxLayout()
         
         layout.addWidget(self.label)
         
@@ -47,9 +58,22 @@ class QLabelLineEditWidget(QWidget):
         
         # Set the layout for the custom widget
         self.setLayout(layout)
+        if not self.stacked:
+            # no side margins, so labels line up with section titles
+            margins = layout.contentsMargins()
+            layout.setContentsMargins(0, margins.top(), 0, margins.bottom())
         # Connect the textChanged signal of QLineEdit to a custom slot
         self.line_edit.editingFinished.connect(self.on_text_finished)
         self.line_edit.textChanged.connect(self.on_text_changed)
+
+    def attachButton(self, button: QPushButton) -> QWidget:
+        """Attach ``button`` (e.g. the </> expression button) to the right
+        end of the field, as a Composer input group."""
+        layout = self.layout()
+        index = layout.indexOf(self.line_edit)
+        group = theme.InputGroup(self.line_edit, button, parent=self)
+        layout.insertWidget(index, group)
+        return group
 
     def setLabel(self, label:str):
         self.label.setText( label )
@@ -110,6 +134,9 @@ class QLabelTextEditWidget(QWidget):
         
         # Set the layout for the custom widget
         self.setLayout(layout)
+        # no side margins, so labels line up with section titles
+        margins = layout.contentsMargins()
+        layout.setContentsMargins(0, margins.top(), 0, margins.bottom())
         
         # Connect the textChanged signal
         self.text_edit.textChanged.connect(self.on_text_changed)
@@ -118,6 +145,9 @@ class QLabelTextEditWidget(QWidget):
         self.text_edit.installEventFilter(self)
 
     def eventFilter(self, obj, event):
+        if sip.isdeleted(self):
+            # being destroyed: Qt still delivers its dying children's events here
+            return False
         """
         Event filter to detect when QTextEdit loses focus.
         This allows us to emit editingFinished similar to QLineEdit.

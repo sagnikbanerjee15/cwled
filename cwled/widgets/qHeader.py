@@ -2,6 +2,7 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QWidget, QLabel, QHBoxLayout
 from .qButtons import QAddButton
 import data
+import theme
 
 
 class HeaderWithAddButton(QWidget):
@@ -44,7 +45,7 @@ class HeaderWithAddButton(QWidget):
         header_layout.setSpacing(10)  # Consistent spacing
         
         # Create and configure the label
-        self.label = QLabel(self._title, self)
+        self.label = theme.styleTitle(QLabel(self._title, self))
         label_width = data.configuration.get('label_width', 100)
         self.label.setFixedWidth(label_width)
         header_layout.addWidget(self.label)

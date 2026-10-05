@@ -12,6 +12,7 @@ import sys
 from typing import Optional, Any, Dict
 
 from JavascriptEditor import JavaScriptEditorDialog
+import theme
 from widgets.QCWLedWidget import QCWLedWidget
 from .qButtons import QRemoveButton, QCodeButton
 from cwl_utils_handler import get_cwl_module
@@ -219,11 +220,11 @@ class QInitialWorkDir(QCWLedWidget):
         # Create a layout and add widgets to it
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.entry_edit_box)
+        # the </> button is attached to the entry field it edits
+        layout.addWidget(theme.InputGroup(self.entry_edit_box, self.edit_button, parent=self))
         layout.addWidget(self.entryname_edit_box)
         layout.addWidget(self.writable_checkbox)
         layout.addWidget(self.remove_button)
-        layout.addWidget(self.edit_button)
         
         # Set the layout for the widget
         self.setLayout(layout)

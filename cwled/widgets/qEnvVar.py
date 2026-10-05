@@ -14,17 +14,19 @@ from widgets.QCWLedWidget import QCWLedWidget
 from widgets.QCWLedGroupWidget import QCWLedGroupWidget
 from cwl_utils_handler import get_cwl_module
 from JavascriptEditor import JavaScriptEditorDialog
+import theme
 
 # Define a constant for label width
 LABEL_WIDTH = 100
 
 from PyQt6.QtCore import QObject, QEvent
+logger = logging.getLogger(__name__)
 
 class FocusDebugger(QObject):
     def eventFilter(self, obj, event):
         if event.type() in [QEvent.Type.FocusIn, QEvent.Type.FocusOut, 
                             QEvent.Type.WindowActivate, QEvent.Type.WindowDeactivate]:
-            print(f"Focus event: {event.type().name} on {obj.__class__.__name__}")
+            logger.debug(f"Focus event: {event.type().name} on {obj.__class__.__name__}")
         return False
 
 class QEnvVarGroupWidget(QCWLedGroupWidget):
@@ -115,8 +117,8 @@ class QEnvVar(QCWLedWidget):
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.envName_edit_box)
-        layout.addWidget(self.envValue_edit_box)
-        layout.addWidget(self.code_button)
+        # the </> button is attached to the value field it edits
+        layout.addWidget(theme.InputGroup(self.envValue_edit_box, self.code_button, parent=self))
         
         # Set the layout for the widget
         self.setLayout(layout)
@@ -129,15 +131,13 @@ class QEnvVar(QCWLedWidget):
         Args:
             widget_to_update: The widget to update with the resulting code
         """
-        print("Opening JavaScript Editor")  # Debug statement
-        sys.exit(234)
         dialog = JavaScriptEditorDialog(parent=self)
         dialog.editor.setText(self.envValue_edit_box.text())
         if dialog.exec() == QDialog.DialogCode.Accepted:
             # Get the JavaScript code when dialog is accepted
             code = dialog.get_javascript_code()
             if code is not None:
-                self.envValue_edit_box(code)
+                self.envValue_edit_box.setText(code)
                 self.codeUpdated.emit()
                 self._emit_editing_finished()  # Use base class method
 

@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import data
 
 from JavascriptEditor import JavaScriptEditorDialog
+import theme
 from widgets.QCWLedWidget import QCWLedWidget
 from widgets.QCWLedGroupWidget import QCWLedGroupWidget
 from .qButtons import QRemoveButton, QCodeButton
@@ -205,9 +206,8 @@ class QDefaultValueWidget(QCWLedWidget):
         # Create a layout and add widgets to it
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.defaultValue_edit_box)
-        
-        layout.addWidget(self.edit_button)
+        # the </> button is attached to the value field
+        layout.addWidget(theme.InputGroup(self.defaultValue_edit_box, self.edit_button, parent=self))
         # Set the layout for the widget
         self.setLayout(layout)
         self.populateFromCWL()

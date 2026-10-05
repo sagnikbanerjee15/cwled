@@ -49,12 +49,14 @@ class QDockerWidget(QCWLedWidget):
         super().initUI()
         
         layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         
-        # Create the Docker image input field
+        # Create the Docker image input field (Composer: "Docker Repository")
         self.docker_image = QLabelLineEditWidget(
-            "Docker image",
+            "Docker Repository",
             "docker image URI",
-            parent=self
+            parent=self,
+            stacked=True
         )
         self.docker_image.editingFinished.connect(self.onDockerImageChanged)
         

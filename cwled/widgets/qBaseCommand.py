@@ -8,6 +8,8 @@ from .qButtons import QRemoveButton
 from widgets.QCWLedWidget import QCWLedWidget
 from widgets.QCWLedGroupWidget import QCWLedGroupWidget
 from helperFunctions import traverseCWLversion 
+import logging
+logger = logging.getLogger(__name__)
 
 class QBaseCommandGroupWidget(QCWLedGroupWidget):
     '''
@@ -51,7 +53,7 @@ class QBaseCommandGroupWidget(QCWLedGroupWidget):
         Args:
             command: Optional command string to initialize the widget with
         """
-        print(f"Adding new command widget with data: {cwl_data}")
+        logger.debug(f"Adding new command widget with data: {cwl_data}")
         self.logger.debug(
             f"Adding a new Command widget with command: {cwl_data}"
         )
@@ -149,15 +151,17 @@ class QBaseCommandWidget(QCWLedWidget):
             
         self.line_order = QLineEdit(self)
         self.line_order.setPlaceholderText("Order")
-        self.line_order.setFixedWidth(20)
+        self.line_order.setFixedWidth(36)
         self.line_order.setText('0')
         
         self.line_command.editingFinished.connect(self._emit_editing_finished)
         self.line_order.editingFinished.connect(self._emit_editing_finished)
         
-        # Add widgets to layout
+        # Add widgets to layout. Like Composer, the commands are listed in
+        # order and the order field is not shown.
         layout.addWidget(self.line_command)
         layout.addWidget(self.line_order)
+        self.line_order.hide()
         
         # Set the layout for the widget
         self.setLayout(layout)
@@ -165,9 +169,9 @@ class QBaseCommandWidget(QCWLedWidget):
     def populateFromCWL(self, 
                         cwl_data: Optional[str] = None):
         
-        print(f"Populating command widget from CWL data: {cwl_data}")
+        logger.debug(f"Populating command widget from CWL data: {cwl_data}")
         super().populateFromCWL(cwl_data)
-        print(f"after super populateFromCWL, cwl_tool is: {self.cwl_tool}   ")
+        logger.debug(f"after super populateFromCWL, cwl_tool is: {self.cwl_tool}   ")
         self.line_command.setText(cwl_data)
 
     def setCWL(self, cwl_tool: Optional[str]):

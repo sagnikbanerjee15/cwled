@@ -22,6 +22,7 @@ from widgets.QCWLedGroupWidget import QCWLedGroupWidget
 import sys
 from cwl_utils_handler import get_cwl_module
 from typing import Optional, Any
+logger = logging.getLogger(__name__)
 
 class QSecondaryFilesGroupWidget(QCWLedGroupWidget):
     # Define a custom signal to indicate that some information has changed
@@ -35,18 +36,18 @@ class QSecondaryFilesGroupWidget(QCWLedGroupWidget):
             self.logger.critical("no parent provided to QSecondaryFilesGroupWidget")
             sys.exit(1)
         else:
-            print(f"Parent provided to QSecondaryFilesGroupWidget: {parent.__class__.__name__}")
+            logger.debug(f"Parent provided to QSecondaryFilesGroupWidget: {parent.__class__.__name__}")
 
         if cwl_version is None and hasattr(parent, 'cwl_version'):
             cwl_version=getattr(parent, 'cwl_version')
-            print(f"QSecondaryFilesGroupWidget Setting cwl_version from parent: {cwl_version}  ")
+            logger.debug(f"QSecondaryFilesGroupWidget Setting cwl_version from parent: {cwl_version}  ")
         super().__init__(
             parent=parent,
             cwl_tool=cwl_tool,
             cwl_version=cwl_version,
             widget_class=QSecondaryFiles,
             label="Secondary Files")
-        print(f"QSecondaryFilesGroupWidget cwl_version is: {self.cwl_version}  ")
+        logger.debug(f"QSecondaryFilesGroupWidget cwl_version is: {self.cwl_version}  ")
         
 
 class QSecondaryFiles(QCWLedWidget):
@@ -130,8 +131,8 @@ class QSecondaryFiles(QCWLedWidget):
     def populateFromCWL(self, 
                         cwl_data: Optional[Any] = None):
         super().populateFromCWL(cwl_data)    
-        print(f"populateFromCWL called with cwl_data: {cwl_data}")
-        print(f"Type of cwl_data: {type(cwl_data).__name__}")
+        logger.debug(f"populateFromCWL called with cwl_data: {cwl_data}")
+        logger.debug(f"Type of cwl_data: {type(cwl_data).__name__}")
         if type(cwl_data).__name__ == "SecondaryFileSchema":
             if hasattr( cwl_data, 'pattern'):
                 self.line_edit1.setText( cwl_data.pattern)

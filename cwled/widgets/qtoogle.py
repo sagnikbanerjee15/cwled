@@ -35,6 +35,7 @@ from PyQt6.QtCore import Qt, QRect, pyqtProperty, QPropertyAnimation, QPoint, \
 from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QBrush, \
     QPen, QFont
 from PyQt6.QtWidgets import QApplication, QWidget, QCheckBox, QVBoxLayout
+import theme
 
 
 class QToggle(QCheckBox):
@@ -56,9 +57,10 @@ class QToggle(QCheckBox):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Composer toggle slider colours
         self._bg_color, self._circle_color, self._active_color, \
-            self._disabled_color, self._text_color = QColor("#0BF"), \
-            QColor("#DDD"), QColor('#777'), QColor("#CCC"), QColor("#000")
+            self._disabled_color, self._text_color = QColor("#4a4a4a"), \
+            QColor(theme.SMOKE), QColor(theme.SKY), QColor(theme.GRAY), QColor(theme.TEXT)
         self._circle_pos, self._intermediate_bg_color = None, None
         self.setFixedHeight(18)
         self._animation_duration = 500  # milliseconds

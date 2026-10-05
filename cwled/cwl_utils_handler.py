@@ -144,3 +144,41 @@ def get_cwl_module(cwl_version: Union[str, Any]):
         )
     return cwl_module
 
+
+
+def format_parameter_type(cwl_type: Any) -> str:
+    """
+    Short display form of a CWL parameter type, as shown in Rabix Composer's
+    lists: ``File``, ``Array<File>``, ``string?`` (optional), and unions such as
+    ``File, Array<File>``.
+    """
+    def name(t: Any) -> str:
+        if isinstance(t, str):
+            return t.split('#')[-1].split('/')[-1]
+        t_type = getattr(t, 'type_', None)
+        if t_type == 'array':
+            return f"Array<{name(getattr(t, 'items', None))}>"
+        if t_type == 'record':
+            return 'record'
+        if t_type == 'enum':
+            return 'enum'
+        if isinstance(t, list):
+            return ', '.join(name(x) for x in t)
+        return 'n/a' if t is None else str(t_type or t)
+
+    if isinstance(cwl_type, list):
+        nullable = 'null' in cwl_type
+        names = [name(t) for t in cwl_type if t != 'null']
+        return ', '.join(f"{n}?" if nullable else n for n in names) or 'null'
+    return name(cwl_type)
+
+
+def format_input_binding(input_binding: Any) -> str:
+    """Rabix Composer input binding summary: the prefix, else ``pos: N``, else ``unbound``."""
+    if not input_binding:
+        return "unbound"
+    if getattr(input_binding, 'prefix', None):
+        return input_binding.prefix
+    if getattr(input_binding, 'position', None):
+        return f"pos: {input_binding.position}"
+    return "pos: 0"

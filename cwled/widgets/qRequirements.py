@@ -6,6 +6,7 @@ from .qLabelLineEditWidget import QLabelLineEditWidget
 from .qButtons import QCodeButton
 import json
 from JavascriptEditor import JavaScriptEditorDialog
+import theme
 from cwl_utils_handler import get_cwl_module
 from typing import Any, Optional, List  # Import Optional and List
 from widgets.QCWLedWidget import QCWLedWidget  # Import the base class
@@ -40,8 +41,8 @@ class QResourceRequirementsWidget(QCWLedWidget):
         min_memory_button.clicked.connect(
             lambda: self.onCodeEditor(self.line_edit_min_memory)
         )
+        self.line_edit_min_memory.attachButton(min_memory_button)
         min_memory_layout.addWidget(self.line_edit_min_memory)
-        min_memory_layout.addWidget(min_memory_button)
         self.line_edit_min_memory.editingFinished.connect(self.onTextChanged)
     
         max_memory_layout = QHBoxLayout()
@@ -55,8 +56,8 @@ class QResourceRequirementsWidget(QCWLedWidget):
         max_memory_button.clicked.connect(
             lambda: self.onCodeEditor(self.line_edit_max_memory)
         )
+        self.line_edit_max_memory.attachButton(max_memory_button)
         max_memory_layout.addWidget(self.line_edit_max_memory)
-        max_memory_layout.addWidget(max_memory_button)
         self.line_edit_max_memory.editingFinished.connect(self.onTextChanged)
 
         min_cores_layout = QHBoxLayout()
@@ -70,8 +71,8 @@ class QResourceRequirementsWidget(QCWLedWidget):
         min_cores_button.clicked.connect(
             lambda: self.onCodeEditor(self.line_edit_min_cores)
         )
+        self.line_edit_min_cores.attachButton(min_cores_button)
         min_cores_layout.addWidget(self.line_edit_min_cores)
-        min_cores_layout.addWidget(min_cores_button)
         self.line_edit_min_cores.editingFinished.connect(self.onTextChanged)
     
         max_cores_layout = QHBoxLayout()
@@ -85,18 +86,21 @@ class QResourceRequirementsWidget(QCWLedWidget):
         max_cores_button.clicked.connect(
             lambda: self.onCodeEditor(self.line_edit_max_cores)
         )
+        self.line_edit_max_cores.attachButton(max_cores_button)
         max_cores_layout.addWidget(self.line_edit_max_cores)
-        max_cores_layout.addWidget(max_cores_button)
         self.line_edit_max_cores.editingFinished.connect(self.onTextChanged)
 
 
+        # a gap between the two columns, now that the </> buttons are attached
         memory_layout= QHBoxLayout()
         memory_layout.setContentsMargins(0, 0, 0, 0)
+        memory_layout.setSpacing(theme.SECTION_SPACING)
         memory_layout.addLayout(min_memory_layout)
         memory_layout.addLayout(max_memory_layout)
 
         cores_layout = QHBoxLayout()
         cores_layout.setContentsMargins(0, 0, 0, 0)
+        cores_layout.setSpacing(theme.SECTION_SPACING)
         cores_layout.addLayout(min_cores_layout)
         cores_layout.addLayout(max_cores_layout)
         self.comp_layout.addLayout(cores_layout)
@@ -229,34 +233,31 @@ class QRequirementsWidget(QCWLedWidget):
         # Logger and initUI() are set up in QCWLedWidget's __init__
 
     def initUI(self):
+        # every requirement on its own line, one below the other
         self.layout = QVBoxLayout()
-        self.inlinejavascript_layout = QHBoxLayout()
+        self.layout.setSpacing(10)
         self.inlinejavascript_checkbox = QCheckBox(
             'InlineJavascript', parent=self
         )
         self.inlinejavascript_expression_lib = QLabelLineEditWidget(
-            label_text='Expression library', parent=self
+            label_text='Expression library', parent=self, stacked=True
         )
         self.inlinejavascript_edit_button = QCodeButton(parent=self)
-        self.inlinejavascript_layout.addWidget(self.inlinejavascript_checkbox)
-        self.inlinejavascript_layout.addWidget(
-            self.inlinejavascript_expression_lib
-        )
-        self.inlinejavascript_layout.addWidget(
-            self.inlinejavascript_edit_button
-        )
         self.inlinejavascript_edit_button.clicked.connect(
             lambda: self.onCodeEditor(self.inlinejavascript_expression_lib)
         )
+        # the expression library field with its </> button attached
+        self.inlinejavascript_expression_lib.attachButton(
+            self.inlinejavascript_edit_button
+        )
 
-        self.shellcommand_layout = QHBoxLayout()
         self.shellcommand_checkbox = QCheckBox('ShellCommand', parent=self)
         self.inplaceupdate_checkbox = QCheckBox('InplaceUpdate', parent=self)
-        self.shellcommand_layout.addWidget(self.shellcommand_checkbox)
-        self.shellcommand_layout.addWidget(self.inplaceupdate_checkbox)
 
-        self.layout.addLayout(self.inlinejavascript_layout)
-        self.layout.addLayout(self.shellcommand_layout)
+        self.layout.addWidget(self.inlinejavascript_checkbox)
+        self.layout.addWidget(self.inlinejavascript_expression_lib)
+        self.layout.addWidget(self.shellcommand_checkbox)
+        self.layout.addWidget(self.inplaceupdate_checkbox)
         self.setLayout(self.layout)
 
         self.inlinejavascript_checkbox.stateChanged.connect(

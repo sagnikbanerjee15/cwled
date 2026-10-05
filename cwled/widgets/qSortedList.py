@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 import data
 
+import theme
 try:
     import data
     from configuration import Configuration
@@ -109,20 +110,18 @@ class QSortList(QCWLedWidget):
         self.table.setItem(row, 0, value_item)
 
         move_up_button = QPushButton(self)
-        move_up_button.setIcon(
-            QIcon(data.configuration.get('icons').get('uparrow', ''))
-        )
-        move_up_button.setIconSize(QSize(24, 24))
+        move_up_button.setIcon(theme.icon('uparrow'))
+        move_up_button.setIconSize(QSize(14, 14))
+        theme.setButtonRole(move_up_button, 'iconButton')
         move_up_button.setFixedSize(QSize(28, 28))
         move_up_button.setToolTip("Move Up")
         move_up_button.clicked.connect(lambda: self._move_up(row))
         self.table.setCellWidget(row, 1, move_up_button)
 
         move_down_button = QPushButton(self)
-        move_down_button.setIcon(
-            QIcon(data.configuration.get('icons').get('downarrow', ''))
-        )
-        move_down_button.setIconSize(QSize(24, 24))
+        move_down_button.setIcon(theme.icon('downarrow'))
+        move_down_button.setIconSize(QSize(14, 14))
+        theme.setButtonRole(move_down_button, 'iconButton')
         move_down_button.setFixedSize(QSize(28, 28))
         move_down_button.setToolTip("Move Down")
         move_down_button.clicked.connect(lambda: self._move_down(row))

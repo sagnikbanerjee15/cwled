@@ -7,44 +7,66 @@ from helperFunctions import addArrayItem
 import unicodedata
 import data
 import re
+import theme
 
 class QLineSeparator(QFrame):
      def __init__(self, parent=None):
         super().__init__(parent=parent)
+        self.setObjectName('separator')
         self.setFrameShape(QFrame.Shape.HLine)
-        self.setFrameShadow(QFrame.Shadow.Sunken)
+        self.setFrameShadow(QFrame.Shadow.Plain)
 
-class QEditButton(QPushButton):
-    def __init__(self, parent=None):
-        super().__init__(parent=parent)
-        self.setIcon(QIcon(data.configuration.get('icons').get('edit') ))
-        self.setIconSize(QSize(32,32 ))
-        self.setFixedSize(QSize(33,33))
-        self.setStyleSheet("border: none;")
 
-class QCodeButton(QPushButton):
-    def __init__(self, parent=None):
+class QIconButton(QPushButton):
+    """Small icon-only button (Composer .btn-icon: muted glyph, light on hover)."""
+    def __init__(self, icon_key: str, tooltip: str, parent=None,
+                 color: str = None, hover_color: str = theme.TEXT):
         super().__init__(parent=parent)
-        self.setIcon(QIcon(data.configuration.get('icons').get('programming') ))
-        self.setIconSize(QSize(32,32 ))
-        self.setFixedSize(QSize(33,33))
-        self.setStyleSheet("border: none;")
+        self._icon = theme.icon(icon_key, color=color)
+        self._hover_icon = theme.icon(icon_key, color=hover_color)
+        self.setIcon(self._icon)
+        self.setIconSize(QSize(16, 16))
+        self.setFixedSize(QSize(26, 26))
+        self.setToolTip(tooltip)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        theme.setButtonRole(self, 'iconButton')
+
+    def enterEvent(self, event):
+        self.setIcon(self._hover_icon)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.setIcon(self._icon)
+        super().leaveEvent(event)
+
+
+class QEditButton(QIconButton):
+    def __init__(self, parent=None):
+        super().__init__('edit', "Edit", parent=parent)
+
+class QCodeButton(QIconButton):
+    def __init__(self, parent=None):
+        super().__init__('programming', "Edit JavaScript expression", parent=parent)
     
-class QRemoveButton(QPushButton):
+class QRemoveButton(QIconButton):
+    """Composer delete icon (.remove-icon): a bare trash glyph, grey on hover."""
     def __init__(self, parent=None):
-        super().__init__(parent=parent)
-        self.setIcon(QIcon(data.configuration.get('icons').get('remove') ))
-        self.setIconSize(QSize(32,32 ))
-        self.setFixedSize(QSize(33,33))
-        self.setStyleSheet("border: none;")
+        super().__init__('remove', "Delete", parent=parent,
+                         color=theme.TEXT, hover_color=theme.LIGHT_GRAY)
+        self.setIconSize(QSize(theme.REMOVE_ICON_WIDTH, theme.REMOVE_ICON_WIDTH))
+        self.setFixedSize(QSize(theme.REMOVE_ICON_WIDTH, theme.formControlHeight()))
+        self.setProperty('iconButton', False)
+        theme.setButtonRole(self, 'plainIcon')
+
 class QAddButton(QPushButton):
+    """Composer "+ Add" link button."""
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        # self.setText("Add")
-        self.setIcon(QIcon(data.configuration.get('icons').get('add') ))
-        self.setIconSize(QSize(32,32 ))
-        self.setFixedSize(QSize(33,33))
-        self.setStyleSheet("border: none;")
+        self.setText("Add")
+        self.setIcon(theme.icon('add'))
+        self.setIconSize(QSize(12, 12))
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        theme.setButtonRole(self, 'link')
 
 class ErrorDialog(QDialog):
     def __init__(self, error_message, details, title="Error"):
@@ -59,9 +81,9 @@ class ErrorDialog(QDialog):
         error_message= "".join(ch for ch in error_message if unicodedata.category(ch)[0]!="C")
         error_label = QLabel(error_message)
         if re.search('error' , title.lower()):
-            error_label.setStyleSheet("color: red; font-size: 16px; font-weight: bold;")
+            error_label.setStyleSheet(f"color: {theme.RED}; font-size: 16px; font-weight: bold;")
         else:
-            error_label.setStyleSheet("color: green; font-size: 16px; font-weight: bold;")
+            error_label.setStyleSheet(f"color: {theme.GREEN}; font-size: 16px; font-weight: bold;")
         layout.addWidget(error_label)
 
         # Scrollable area for detailed text
@@ -74,7 +96,7 @@ class ErrorDialog(QDialog):
         
         # Set HTML formatted detailed error message
         detailed_text.setPlainText(details)
-        detailed_text.setStyleSheet("background-color: #f8f8f8; padding: 5px;")
+        detailed_text.setStyleSheet(f"background-color: {theme.TERMINAL_BG}; padding: 5px;")
         
         # Add the QTextEdit to the layout
         layout.addWidget(detailed_text)

@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
 )
 
 import logging
+import theme
 from .qHeader import HeaderWithAddButton
 from widgets.QCWLedWidget import QCWLedWidget
 from .qButtons import QRemoveButton
@@ -138,6 +139,7 @@ class QCWLedGroupWidget(QCWLedWidget):
         row_widget = QWidget()
         row_layout = QHBoxLayout(row_widget)
         row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(theme.ROW_ACTION_SPACING)
         row_layout.addWidget(widget, 1)
 
         remove_button = QRemoveButton(parent=self)
