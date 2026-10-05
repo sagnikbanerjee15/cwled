@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import data
 
+import theme
 class TemplateEditorDialog(QDialog):
     """
     A dialog for editing CWL tool input templates.
@@ -154,7 +155,7 @@ class TemplateEditorDialog(QDialog):
                     if key == 'class' or current_path.endswith('.class'):
                         line_edit.setReadOnly(True)
                         # Add some styling to indicate it's read-only
-                        line_edit.setStyleSheet("background-color: #f0f0f0;")
+                        line_edit.setStyleSheet(f"background-color: {theme.INPUT_BG_DISABLED};")
                     
                     self.template_widgets[current_path] = line_edit
                     layout.addRow(label, line_edit)
@@ -176,7 +177,7 @@ class TemplateEditorDialog(QDialog):
                 if path_prefix == 'class':
                     line_edit.setReadOnly(True)
                     # Add some styling to indicate it's read-only
-                    line_edit.setStyleSheet("background-color: #f0f0f0;")
+                    line_edit.setStyleSheet(f"background-color: {theme.INPUT_BG_DISABLED};")
                     
                 self.template_widgets[path_prefix] = line_edit
                 layout.addRow(label, line_edit)

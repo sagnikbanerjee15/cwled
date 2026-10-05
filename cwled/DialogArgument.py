@@ -8,6 +8,7 @@ import builtins
 import logging
 from widgets.qButtons import *
 from JavascriptEditor import JavaScriptEditorDialog
+import theme
 from dataTypes import argument
 from copy import deepcopy
 from typing import Any, Tuple 
@@ -15,6 +16,7 @@ from CWLparser import Parser, is_array, is_optional_array, is_optional, get_type
 from cwl_utils.parser import save
 from cwl_utils_handler import get_cwl_module, get_cwl_version
 from BaseDialog import BaseDialog
+logger = logging.getLogger(__name__)
 
 class ArgumentDialog(BaseDialog):
     """A dialog that collects user input for prefix, argument, position, and checkbox options.
@@ -78,11 +80,10 @@ class ArgumentDialog(BaseDialog):
 
         layout_in=QHBoxLayout()
         layout.addWidget(QLabel("Argument:"))
-        layout_in.addWidget(self.argument_edit)
         code_button=QCodeButton()
         code_button.clicked.connect( lambda:self.onCodeEditor(self.argument_edit))
-        
-        layout_in.addWidget(code_button)
+        # the </> button is attached to the value field (Composer input group)
+        layout_in.addWidget(theme.InputGroup(self.argument_edit, code_button, parent=self))
         layout.addLayout(layout_in)
         
 
@@ -144,11 +145,10 @@ class ArgumentDialog(BaseDialog):
 
         self.set_prefix(self.argument_parameter.prefix)
         self.set_argument(self.argument_parameter.valueFrom)
-        if not self.argument_parameter.position:
-            self.argument_parameter.position=0
-        self.set_position( self.argument_parameter.position) 
-        if hasattr(self.argument_parameter, 'separate') and self.argument_parameter.separate :
-            self.setSeparateValuePrefix(self.argument_parameter.separate)
+        # show the values without changing the argument being edited
+        self.set_position(self.argument_parameter.position or 0)
+        # CWL separates prefix and value unless separate is explicitly false
+        self.setSeparateValuePrefix(getattr(self.argument_parameter, 'separate', None) is not False)
         if hasattr(self.argument_parameter, 'shellQuote') and self.argument_parameter.shellQuote :
             self.set_shell_quote(self.argument_parameter.shellQuote)
 
@@ -180,9 +180,9 @@ class ArgumentDialog(BaseDialog):
         tags = self.tag_input.text().strip()
         if tags:
             tag_list = [tag.strip() for tag in tags.split(",")]
-            print(f"Submitted tags: {tag_list}")
+            logger.debug(f"Submitted tags: {tag_list}")
         else:
-            print("No tags entered.")
+            logger.debug("No tags entered.")
 
     def getData(self):
         """Return the values entered in the dialog.
@@ -198,11 +198,20 @@ class ArgumentDialog(BaseDialog):
             self.logger.warning(
                 f"Invalid position value: {self.position_edit.text()}, using 0"
             )
+        # a value the user left unset is not written with its default, so the
+        # argument stays as it was (shellQuote: false would change what a
+        # ShellCommandRequirement tool runs)
+        original = getattr(self, 'argument_parameter', None)
+
+        def kept(name, value, unset_value):
+            before = getattr(original, name, None) if original is not None and not isinstance(original, str) else None
+            return None if before is None and value == unset_value else value
+
         argumentparameter = module.CommandLineBinding(
-            position=position,
-            prefix=self.prefix_edit.text(),
-            separate=self.separate_value_and_prefix_check.isChecked(),
-            shellQuote=self.shell_quote_check.isChecked()
+            position=kept('position', position, 0),
+            prefix=self.prefix_edit.text() or None,
+            separate=kept('separate', self.separate_value_and_prefix_check.isChecked(), True),
+            shellQuote=kept('shellQuote', self.shell_quote_check.isChecked(), False)
         )
         if self.argument_edit.text():
             argumentparameter.valueFrom=self.argument_edit.text()

@@ -2,6 +2,7 @@ from PyQt6.QtCore import *
 from PyQt6.QtWidgets import *
 from PyQt6.QtGui import QAction, QIcon, QFont, QColor,QFontMetrics
 
+import copy
 import json
 from configuration import Configuration
 import builtins
@@ -9,6 +10,7 @@ import logging
 from sanitizeName import sanitize
 from widgets.qButtons import *
 from JavascriptEditor import JavaScriptEditorDialog
+import theme
 from widgets.qSecondaryFiles import QSecondaryFilesGroupWidget
 from Tags import QTagWidget
 import sys 
@@ -28,6 +30,33 @@ from CWLparser import Parser, is_array, is_optional_array, is_optional, get_type
 from cwl_utils.parser import save
 from cwl_utils_handler import get_cwl_module, get_cwl_version
 from BaseDialog import BaseDialog
+logger = logging.getLogger(__name__)
+
+def _mainSchema(cwl_type: Any) -> Any:
+    """The (first) non-null type of a parameter."""
+    if isinstance(cwl_type, list):
+        types = [t for t in cwl_type if t != 'null']
+        return types[0] if types else None
+    return cwl_type
+
+
+def _schemas(cwl_type: Any):
+    """The schema objects in a type (inside unions too)."""
+    if isinstance(cwl_type, list):
+        for item in cwl_type:
+            yield from _schemas(item)
+    elif cwl_type is not None and not isinstance(cwl_type, str):
+        yield cwl_type
+
+
+def _workingCopy(parameter):
+    """A shallow copy of a parameter with its own type list, for the dialog
+    to read (and trim) without changing the parameter of the tool."""
+    duplicate = copy.copy(parameter)
+    if isinstance(getattr(parameter, 'type_', None), list):
+        duplicate.type_ = list(parameter.type_)
+    return duplicate
+
 
 class InputDialog(BaseDialog):
     code=''
@@ -47,6 +76,11 @@ class InputDialog(BaseDialog):
         super().__init__(parent)
         self.logger=logging.getLogger(__name__)
         self.logger.setLevel(data.configuration.get('logLevel',{}).get(self.__class__.__name__, 'DEBUG'))
+        # bindings as loaded, so that saving keeps what the dialog does not edit
+        self._original_binding = None   # the binding edited by the dialog
+        self._type_binding = None       # ... when it lives on an enum/record type
+        self._item_binding = None       # the binding of array items (kept as is)
+        self._command_line_before_record = None
         
         if input_parameter is not None and cwl_version is None:
             self.setCWLVersion(input_parameter)
@@ -68,11 +102,12 @@ class InputDialog(BaseDialog):
         self.initUI()
         self.logger.debug(" ===== Input Dialog ==========")
         if input_parameter is not None:
-            self.input_parameter=input_parameter
-            print(f"Received the object of type {input_parameter}")
+            # a working copy: loading must not change the tool (it strips 'null'...)
+            self.input_parameter=_workingCopy(input_parameter)
+            logger.debug(f"Received the object of type {input_parameter}")
             self.setDefaults()
         elif input_parameter_type is not None:
-            print(f"Setting the object to {input_parameter_type} from the arguments")
+            logger.debug(f"Setting the object to {input_parameter_type} from the arguments")
             self.onDataTypeChanged()
             
         self.logger.debug(f"InputDialog received {self.input_parameter_type}")
@@ -228,9 +263,9 @@ class InputDialog(BaseDialog):
             # Shell quote
             self.shellquote_checkbox = QCheckBox("ShellQuote")
             self.shellquote_checkbox.setChecked(False)
+            # the </> button is attached to the value field (Composer input group)
             layout_in=QHBoxLayout()
-            layout_in.addWidget(self.value_input)
-            layout_in.addWidget(self.code_button)
+            layout_in.addWidget(theme.InputGroup(self.value_input, self.code_button, parent=self))
 
             scroll_layout.addWidget(self.command_line_checkbox)
 
@@ -337,7 +372,7 @@ class InputDialog(BaseDialog):
         """
         data_type=self.data_type_combobox.currentText()
 
-        print(f"Data type changed: working with {data_type} for {self.input_parameter_type}")
+        logger.debug(f"Data type changed: working with {data_type} for {self.input_parameter_type}")
 
         # Clear any previously added dynamic widgets
         for i in reversed(range(self.dynamic_area_layout.count())):
@@ -429,6 +464,9 @@ class InputDialog(BaseDialog):
             self.dynamic_area_layout.addWidget(self.record_type_list_widget)    
 
             if hasattr(self, 'command_line_checkbox') and self.command_line_checkbox:
+                # records are bound through their fields; restored when leaving record
+                if self._command_line_before_record is None:
+                    self._command_line_before_record = self.command_line_checkbox.isChecked()
                 self.command_line_checkbox.setChecked(False)
 
             # Hide scalar default; show read-only record default summary
@@ -442,6 +480,9 @@ class InputDialog(BaseDialog):
         self.field_name_input.setVisible(data_type=='enum' or self.input_parameter_type == 'CommandInputRecordField')
 
         if data_type !='record':
+            if self._command_line_before_record is not None and hasattr(self, 'command_line_checkbox'):
+                self.command_line_checkbox.setChecked(self._command_line_before_record)
+            self._command_line_before_record = None
             if self.record_type_label:
                 self.record_type_label.setParent(None)
                 self.record_type_label=None
@@ -805,7 +846,7 @@ class InputDialog(BaseDialog):
                     self.updateRecordDefaultFields(field_names, self.input_parameter.default, record_type='exclusive', field_types=field_types)
                     if hasattr(self, 'record_type_list_widget') and self.record_type_list_widget:
                         self.record_type_list_widget.setCurrentText('mutually exclusive')
-                    print(f"Setting exclusive record default summary '{self.input_parameter.default}'")
+                    logger.debug(f"Setting exclusive record default summary '{self.input_parameter.default}'")
                 else:
                     # Dependent record: show all fields and their defaults
                     field_names = []
@@ -826,73 +867,50 @@ class InputDialog(BaseDialog):
                     if not field_names:
                         field_names = list(self.input_parameter.default.keys())
                     self.updateRecordDefaultFields(field_names, self.input_parameter.default, record_type='dependent', field_types=field_types)
-                    print(f"Setting dependent record default summary '{self.input_parameter.default}'")
+                    logger.debug(f"Setting dependent record default summary '{self.input_parameter.default}'")
                 self.record_default_widget.setVisible(True)
             else:
                 self.defaultvalue_input.setText(str(self.input_parameter.default))
-                print(f"Setting default value '{self.input_parameter.default}'")
+                logger.debug(f"Setting default value '{self.input_parameter.default}'")
 
         # For CommandInputRecordField, check for _field_default (set by parent record)
         if hasattr(self.input_parameter, '_field_default') and self.input_parameter._field_default is not None:
             self.defaultvalue_input.setText(str(self.input_parameter._field_default))
             self.defaultvalue_label.setVisible(True)
             self.defaultvalue_input.setVisible(True)
-            print(f"Setting field default value '{self.input_parameter._field_default}'")
+            logger.debug(f"Setting field default value '{self.input_parameter._field_default}'")
 
-        # need to find teh inputBinding
-        # either from the data
-        # or from the type_ if it exists
-        # or from items of a list
-        inputBindings=[] # we may have inputbinding in the data or in the type_
-        if hasattr(self.input_parameter,'inputBinding') and self.input_parameter.inputBinding:
-            print(f"Shallow inputBinding {self.input_parameter.inputBinding}")
-            inputBindings.append(self.input_parameter.inputBinding)
-        if hasattr(self.input_parameter.type_,'inputBinding') and self.input_parameter.type_.inputBinding:
-            print(f"type inputBinding {self.input_parameter.type_.inputBinding}")
-            inputBindings.append(self.input_parameter.type_.inputBinding)
-        if isinstance(self.input_parameter, list):
-            print(f"list of items ")
-            for item in self.input_parameter:
-                if hasattr(item, 'inputBinding') and item.inputBinding:
-                    print(f"Item inputBinding {item.inputBinding}")
-                    inputBindings.append(item.inputBinding)
-                if hasattr(item, 'type_') and hasattr(item.type_, 'inputBinding') and item.type_.inputBinding:
-                    print(f"Item type inputBinding {item.type_.inputBinding}")
-                    inputBindings.append(item.type_.inputBinding)
-        if isinstance(self.input_parameter.type_, list):
-            print(f"list of items ")
-            for item in self.input_parameter.type_:
-                if hasattr(item, 'inputBinding') and item.inputBinding:
-                    print(f"Item inputBinding {item.inputBinding}")
-                    inputBindings.append(item.inputBinding)
-                if hasattr(item, 'type_') and hasattr(item.type_, 'inputBinding') and item.type_.inputBinding:
-                    print(f"Item type inputBinding {item.type_.inputBinding}")
-                    inputBindings.append(item.type_.inputBinding)
+        # The binding edited here is the parameter's own one, or, when it has
+        # none, the one an enum/record type carries. The binding of array
+        # items stays as it is (and is put back by getData).
+        own_binding = getattr(self.input_parameter, 'inputBinding', None)
+        schema = _mainSchema(getattr(self.input_parameter, 'type_', None))
+        if getattr(schema, 'type_', None) == 'array':
+            self._item_binding = getattr(schema, 'inputBinding', None)
+        elif own_binding is None:
+            self._type_binding = getattr(schema, 'inputBinding', None)
+        self._original_binding = own_binding or self._type_binding
+        inputBindings = [self._original_binding] if self._original_binding is not None else []
 
-
-        
         if len(inputBindings) > 0:
             if hasattr(self, 'command_line_checkbox'):
                 self.command_line_checkbox.setChecked(True)
             self.order=0
             for inputBinding in inputBindings:
-                print(f"InputBinding {save(inputBinding)}")
-                if hasattr(inputBinding,'prefix'):
-                    self.prefix_input.setText( inputBinding.prefix)
-                if hasattr(inputBinding,'valueFrom') :
-                    self.value_input.setText( inputBinding.valueFrom)
+                logger.debug(f"InputBinding {save(inputBinding)}")
+                self.prefix_input.setText(getattr(inputBinding, 'prefix', None) or '')
+                self.value_input.setText(getattr(inputBinding, 'valueFrom', None) or '')
                 
-                if hasattr(inputBinding,'itemSeparator'):
-                    item_separator=inputBinding.itemSeparator
-                    if item_separator and item_separator == ' ':
-                        item_separator='space'
-                    if item_separator and item_separator not in [' ',',',';',':','-','/']:
+                item_separator = getattr(inputBinding, 'itemSeparator', None)
+                if item_separator is not None:
+                    if item_separator == ' ':
+                        item_separator = 'space'
+                    elif item_separator not in [',',';',':','-','/']:
                         item_separator = 'other'
-                    self.item_separator_combobox.setCurrentText( item_separator)
-                if hasattr(inputBinding,'separate'):
-                    self.separate_value_prefix_checkbox.setChecked(bool(inputBinding.separate))
-                else:
-                    self.separate_value_prefix_checkbox.setChecked(False)
+                    self.item_separator_combobox.setCurrentText(item_separator)
+                # CWL separates prefix and value unless separate is explicitly false
+                self.separate_value_prefix_checkbox.setChecked(
+                    getattr(inputBinding, 'separate', None) is not False)
                 if hasattr(inputBinding,'shellQuote'):
                     self.shellquote_checkbox.setChecked(bool(inputBinding.shellQuote))
                 else:
@@ -952,6 +970,40 @@ class InputDialog(BaseDialog):
 # added this function here only for testing purposes.
 # This function should be a copy of the same function
 # in the qInputs.py
+    def _editedBinding(self, module, position: int):
+        """
+        The binding from the dialog's fields, starting from the binding that
+        was loaded: a field the user left as it was keeps its original value,
+        so unset values (separate, shellQuote, itemSeparator, position) are
+        not written out with defaults that would change what the tool does.
+        """
+        original = self._original_binding
+
+        def kept(name, value, unset_value):
+            before = getattr(original, name, None) if original is not None else None
+            return None if before is None and value == unset_value else value
+
+        separator_choice = self.item_separator_combobox.currentText()
+        original_separator = getattr(original, 'itemSeparator', None) if original is not None else None
+        if separator_choice == 'space':
+            item_separator = ' ' if original_separator == ' ' else None
+        elif separator_choice == 'other':
+            item_separator = original_separator
+        else:
+            item_separator = separator_choice
+        binding = module.CommandLineBinding(
+            prefix=self.prefix_input.text() or None,
+            separate=kept('separate', self.separate_value_prefix_checkbox.isChecked(), True),
+            shellQuote=kept('shellQuote', self.shellquote_checkbox.isChecked(), False),
+            itemSeparator=item_separator,
+            position=kept('position', position, 0),
+            valueFrom=self.value_input.text() or None,
+        )
+        # what the dialog does not edit (e.g. loadContents) is kept
+        if original is not None and getattr(original, 'loadContents', None) is not None:
+            binding.loadContents = original.loadContents
+        return binding
+
     def getData( self) -> Any:
         """
         Create CWL CommandInputParameter object from
@@ -1024,15 +1076,25 @@ class InputDialog(BaseDialog):
         binding=None
         if hasattr(self, 'command_line_checkbox') and self.command_line_checkbox.isChecked():
             self.logger.debug("Preparing the inputBinding")
-            binding = module.CommandLineBinding(
-                prefix=self.prefix_input.text(),
-                separate=self.separate_value_prefix_checkbox.isChecked(),
-                shellQuote=self.shellquote_checkbox.isChecked(),
-                itemSeparator=self.item_separator_combobox.currentText(),
-                position=position
-            )
-            if self.value_input.text():
-                binding.valueFrom=self.value_input.text()
+            binding = self._editedBinding(module, position)
+        # put the bindings that live on the type back where they were
+        schemas = list(_schemas(input_type))
+        # a record type keeps its name
+        original_schema = _mainSchema(getattr(getattr(self, 'input_parameter', None), 'type_', None))
+        if getattr(original_schema, 'type_', None) == 'record' and getattr(original_schema, 'name', None):
+            for record_schema in [t for t in schemas if getattr(t, 'type_', None) == 'record']:
+                # cwl_utils names new schemas "_:<uuid>"
+                if str(getattr(record_schema, 'name', None) or '_:').startswith('_:'):
+                    record_schema.name = original_schema.name
+        if binding is not None and self._type_binding is not None:
+            typed = [t for t in schemas if getattr(t, 'type_', None) in ('enum', 'record')]
+            if typed:
+                typed[0].inputBinding = binding
+                binding = None
+        if self._item_binding is not None:
+            for array_schema in [t for t in schemas if getattr(t, 'type_', None) == 'array']:
+                if getattr(array_schema, 'inputBinding', None) is None:
+                    array_schema.inputBinding = self._item_binding
         
 
         self.logger.debug(f"Input type {self.input_parameter_type} to return")
@@ -1082,15 +1144,24 @@ class InputDialog(BaseDialog):
             elif it in {'int', 'long'}:
                 default = int(default)
             elif it in {'double', 'float'}:
-                default = float(default)
+                # keep "10" an integer: a float input accepts it as it was written
+                default = int(default) if re.fullmatch(r'[+-]?\d+', default) else float(default)
 
+
+        # optional attributes are only written when set (no [] / false defaults)
+        secondary_files = (self.secondary_files_input.getData() if self.secondary_files_input else None) or None
+        streamable = None
+        if self.streamable_checkbox is not None:
+            streamable = True if self.streamable_checkbox.isChecked() else None
+            if streamable is None and getattr(getattr(self, 'input_parameter', None), 'streamable', None) is False:
+                streamable = False
 
         if self.input_parameter_type=='CommandInputParameter':
             inputparameter=module.CommandInputParameter(
                 id=self.id_input.text(), # can be many input types
                 label=self.label_input.text(),
-                secondaryFiles=self.secondary_files_input.getData() if self.secondary_files_input else None,
-                streamable=self.streamable_checkbox.isChecked() if self.streamable_checkbox else None, 
+                secondaryFiles=secondary_files,
+                streamable=streamable, 
                 doc=self.description_input.toPlainText(),
                 inputBinding=binding,
                 default=default,
@@ -1100,8 +1171,8 @@ class InputDialog(BaseDialog):
             inputparameter=module.InputParameter(
                 id=self.id_input.text(), # can be many input types
                 label=self.label_input.text(),
-                secondaryFiles=self.secondary_files_input.getData() if self.secondary_files_input else None,
-                streamable=self.streamable_checkbox.isChecked() if self.streamable_checkbox else None, 
+                secondaryFiles=secondary_files,
+                streamable=streamable, 
                 doc=self.description_input.toPlainText(),
                 inputBinding=binding,
                 default=default,
@@ -1111,8 +1182,8 @@ class InputDialog(BaseDialog):
             inputparameter=module.CommandInputRecordField(
                 label=self.label_input.text(),
                 name= self.field_name_input.text(),
-                secondaryFiles=self.secondary_files_input.getData() if self.secondary_files_input else None,
-                streamable=self.streamable_checkbox.isChecked() if self.streamable_checkbox else None, 
+                secondaryFiles=secondary_files,
+                streamable=streamable, 
                 doc=self.description_input.toPlainText(),
                 inputBinding=binding,
                 type_=input_type
@@ -1124,8 +1195,8 @@ class InputDialog(BaseDialog):
             inputparameter=module.WorkflowInputParameter(
                 id=self.id_input.text(), # can be many input types
                 label=self.label_input.text(),
-                secondaryFiles=self.secondary_files_input.getData() if self.secondary_files_input else None,
-                streamable=self.streamable_checkbox.isChecked() if self.streamable_checkbox else None, 
+                secondaryFiles=secondary_files,
+                streamable=streamable, 
                 doc=self.description_input.toPlainText(),
                 # inputBinding=binding,
                 default=default,

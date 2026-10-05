@@ -13,6 +13,7 @@ from widgets.qConditionalInput import QConditionalInputsGroupWidget
 from widgets.qSortedList import QSortList
 from JavascriptEditor import JavaScriptEditorDialog
 import data
+import theme
 import jinja2
 from pathlib import Path
 from typing import Optional, Any, Union,List
@@ -21,6 +22,7 @@ from cwl_utils_handler import get_cwl_module, get_cwl_version
 from ports import PortSplitter
 from CWLparser import get_type, get_items, get_symbols
 from BaseDialog import BaseDialog
+logger = logging.getLogger(__name__)
 
 # Define the step data structure
 step = {
@@ -73,8 +75,8 @@ class InputRowWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 5, 0, 5)
         layout.setSpacing(5)
-        print(f"Adding input row for: {save(self.cwl_step)}")
-        print(f"With CWL input {save(self.cwl_input)}")
+        logger.debug(f"Adding input row for: {save(self.cwl_step)}")
+        logger.debug(f"With CWL input {save(self.cwl_input)}")
         # Top row with name and type
         top_row = QVBoxLayout()
         
@@ -93,13 +95,7 @@ class InputRowWidget(QWidget):
         
         # Add info icon next to id_label
         self.info_icon = QLabel()
-        icon_path =Path(data.configuration.get('icons').get('info')) 
-        if icon_path.exists():
-            pixmap = QIcon(str(icon_path)).pixmap(16, 16)  # 16x16 pixel icon
-            self.info_icon.setPixmap(pixmap)
-        else:
-            self.info_icon.setText("ℹ")  # Fallback unicode info symbol
-            self.info_icon.setStyleSheet("color: blue; font-weight: bold;")
+        self.info_icon.setPixmap(theme.icon('info').pixmap(QSize(16, 16), self.devicePixelRatioF()))
         
         # Set tooltip based on cwl_step.doc value
         if hasattr(self.cwl_step, 'doc') and self.cwl_step.doc:
@@ -159,7 +155,7 @@ class InputRowWidget(QWidget):
 
                 record_group = QGroupBox("Record Fields")
                 record_group.setStyleSheet(
-                    "QGroupBox { border: 1px solid #aaaaaa; border-radius: 4px; "
+                    f"QGroupBox {{ border: 1px solid {theme.BLACK}; border-radius: 2px; "
                     "margin-top: 8px; padding-top: 12px; } "
                     "QGroupBox::title { subcontrol-origin: margin; left: 10px; }"
                 )
@@ -275,7 +271,7 @@ class InputRowWidget(QWidget):
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
-        line.setStyleSheet("color: #cccccc;")
+        line.setStyleSheet(f"color: {theme.BLACK};")
         layout.addWidget(line)
         
         self.setLayout(layout)
@@ -544,8 +540,8 @@ class StepDialog(BaseDialog):
         self.when_layout = QHBoxLayout(self.when_container)
         self.when_layout.setContentsMargins(0, 0, 0, 0)
         self.when_layout.addWidget(self.when_label)
-        self.when_layout.addWidget(self.when_input)
-        self.when_layout.addWidget(self.when_code_button)
+        # the </> button is attached to the field (Composer input group)
+        self.when_layout.addWidget(theme.InputGroup(self.when_input, self.when_code_button, parent=self))
         
         # Documentation input
         self.doc_label = QLabel("Documentation:")

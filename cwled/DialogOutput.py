@@ -1,6 +1,7 @@
 from PyQt6.QtCore import *
 from PyQt6.QtWidgets import *
 
+import copy
 import json
 from configuration import Configuration
 import builtins
@@ -8,6 +9,7 @@ import logging
 from sanitizeName import sanitize
 from widgets.qButtons import *
 from JavascriptEditor import JavaScriptEditorDialog
+import theme
 from widgets.qSecondaryFiles import  QSecondaryFilesGroupWidget
 from Tags import QTagWidget
 import sys 
@@ -27,6 +29,16 @@ from cwl_utils.parser import save
 from cwl_utils_handler import get_cwl_module, get_cwl_version
 from CWLparser import get_type, Parser, is_optional, is_optional_array, is_array
 from BaseDialog import BaseDialog
+logger = logging.getLogger(__name__)
+
+def _workingCopy(parameter):
+    """A shallow copy of a parameter with its own type list, for the dialog
+    to read (and trim) without changing the parameter of the tool."""
+    duplicate = copy.copy(parameter)
+    if isinstance(getattr(parameter, 'type_', None), list):
+        duplicate.type_ = list(parameter.type_)
+    return duplicate
+
 
 class OutputDialog(BaseDialog):
     code=''
@@ -53,11 +65,13 @@ class OutputDialog(BaseDialog):
         self.setWindowTitle(f"Outputs (cwl:{self.cwl_version})")
         self.initUI()
         if output_parameter is not None:
-            self.output_parameter=output_parameter
+            # a working copy: loading must not change the tool (it strips 'null'...)
+            self.output_parameter=_workingCopy(output_parameter)
             self.setDefaults()
         elif output_parameter_type is not None:
-            print(f"Setting the object to {output_parameter_type} from the arguments")
+            logger.debug(f"Setting the object to {output_parameter_type} from the arguments")
             self.output_parameter_type = output_parameter_type  # Default to an empty CommandInputParameter
+            self._offerStreamTypes()
             self.onDataTypeChanged()
         else:
             raise ValueError("Either output_parameter or output_parameter_type must be provided.")
@@ -133,9 +147,9 @@ class OutputDialog(BaseDialog):
         self.glob_code_button.setVisible( not self.output_parameter_type == "WorkflowOutputParameter")
         self.glob_input.setVisible( not self.output_parameter_type == "WorkflowOutputParameter")
         self.glob_label.setVisible( not self.output_parameter_type == "WorkflowOutputParameter")
+        # the </> buttons are attached to their fields (Composer input group)
         layout_glob=QHBoxLayout()
-        layout_glob.addWidget(self.glob_input)
-        layout_glob.addWidget(self.glob_code_button)
+        layout_glob.addWidget(theme.InputGroup(self.glob_input, self.glob_code_button, parent=self))
 
         # Label input
         self.label_label = QLabel("Label:")
@@ -208,8 +222,7 @@ class OutputDialog(BaseDialog):
         self.output_eval.setVisible(not self.output_parameter_type == 'WorkflowOutputParameter')
         self.output_eval_code.setVisible(not self.output_parameter_type == 'WorkflowOutputParameter')
 
-        layout_output_eval.addWidget(self.output_eval)
-        layout_output_eval.addWidget(self.output_eval_code)
+        layout_output_eval.addWidget(theme.InputGroup(self.output_eval, self.output_eval_code, parent=self))
         self.layout.addWidget(self.output_eval_label)
         self.layout.addLayout(layout_output_eval)
 
@@ -409,6 +422,14 @@ class OutputDialog(BaseDialog):
         pass
 
 
+    def _offerStreamTypes(self):
+        """A tool output can also capture the standard output / error."""
+        if getattr(self, 'output_parameter_type', None) == 'WorkflowOutputParameter':
+            return
+        for stream in ('stdout', 'stderr'):
+            if self.data_type_combobox.findText(stream) < 0:
+                self.data_type_combobox.addItem(stream)
+
     def setDefaults(self):
         '''
         set the default values in the widgets
@@ -466,7 +487,7 @@ class OutputDialog(BaseDialog):
             output_type.remove('array')
         except ValueError:
             pass
-        print(f"Setting data type '{output_type}'")
+        logger.debug(f"Setting data type '{output_type}'")
         
         # Check for record field and set checkbox and record_id if needed
         
@@ -503,7 +524,7 @@ class OutputDialog(BaseDialog):
                 self.field_name_input.setText(field_name.split('#')[-1].split('/')[-1])
             if enum_fields:
                 enum_fields=[ y.split("/")[-1] for y in [ x.split('#')[-1] for x in enum_fields ] ]
-            print(f"We have an enum type {output_type} with fields {enum_fields}")
+            logger.debug(f"We have an enum type {output_type} with fields {enum_fields}")
         # get the information for a record
         if (isinstance(output_type, list) and 'record' in output_type) or \
             output_type == 'record':
@@ -515,8 +536,8 @@ class OutputDialog(BaseDialog):
             if isinstance( self.output_parameter.type_ , list):
                 output_type='record mutually exclusive arguments'
             
-            print(f"Record type {output_type}")
-            print(f"Record id { self.output_parameter.id.split('#')[-1]}")
+            logger.debug(f"Record type {output_type}")
+            logger.debug(f"Record id { self.output_parameter.id.split('#')[-1]}")
         # set the necessary ui for a record field
         if re.search("CommandOutputRecordField", str(type(self.output_parameter))):
             self.record_field_checkbox.setChecked(True)
@@ -524,6 +545,7 @@ class OutputDialog(BaseDialog):
 
         if isinstance(output_type, list) and len(output_type)>1:
             raise Exception(f"input type {output_type} is a list with many elements {len(output_type)}")
+        self._offerStreamTypes()
         self.data_type_combobox.setCurrentText( output_type[0] if isinstance(output_type, list) else output_type)
         
         self.onDataTypeChanged()
@@ -547,28 +569,28 @@ class OutputDialog(BaseDialog):
         # or from items of a list
         outputBindings=[] # we may have inputbinding in the data or in the type_
         if hasattr(self.output_parameter,'outputBinding') and self.output_parameter.outputBinding:
-            print(f"Shallow outputBinding {self.output_parameter.outputBinding}")
+            logger.debug(f"Shallow outputBinding {self.output_parameter.outputBinding}")
             outputBindings.append(self.output_parameter.outputBinding)
         if hasattr(self.output_parameter.type_,'outputBinding') and self.output_parameter.type_.outputBinding:
-            print(f"type outputBinding {self.output_parameter.type_.outputBinding}")
+            logger.debug(f"type outputBinding {self.output_parameter.type_.outputBinding}")
             outputBindings.append(self.output_parameter.type_.outputBinding)
         if isinstance(self.output_parameter, list):
-            print(f"list of items ")
+            logger.debug(f"list of items ")
             for item in self.output_parameter:
                 if hasattr(item, 'outputBinding') and item.outputBinding:
-                    print(f"Item outputBinding {item.outputBinding}")
+                    logger.debug(f"Item outputBinding {item.outputBinding}")
                     outputBindings.append(item.outputBinding)
                 if hasattr(item, 'type_') and hasattr(item.type_, 'outputBinding') and item.type_.outputBinding:
-                    print(f"Item type outputBinding {item.type_.outputBinding}")
+                    logger.debug(f"Item type outputBinding {item.type_.outputBinding}")
                     outputBindings.append(item.type_.outputBinding)
         if isinstance(self.output_parameter.type_, list):
-            print(f"list of items ")
+            logger.debug(f"list of items ")
             for item in self.output_parameter.type_:
                 if hasattr(item, 'outputBinding') and item.outputBinding:
-                    print(f"Item outputBinding {item.outputBinding}")
+                    logger.debug(f"Item outputBinding {item.outputBinding}")
                     outputBindings.append(item.outputBinding)
                 if hasattr(item, 'type_') and hasattr(item.type_, 'outputBinding') and item.type_.outputBinding:
-                    print(f"Item type outputBinding {item.type_.outputBinding}")
+                    logger.debug(f"Item type outputBinding {item.type_.outputBinding}")
                     outputBindings.append(item.type_.v)
 
 
@@ -726,9 +748,12 @@ class OutputDialog(BaseDialog):
             if hasattr( binding, 'outputEval') and self.output_eval.text():
                 binding_args['outputEval'] = self.output_eval.text()
                 
-            # Include loadContents if checkbox exists and is checked
+            # loadContents only when set (or when it was set before)
             if hasattr(self, 'load_content_checkbox') and self.load_content_checkbox:
-                binding_args['loadContents'] = self.load_content_checkbox.isChecked()
+                original = getattr(getattr(getattr(self, 'output_parameter', None), 'outputBinding', None),
+                                   'loadContents', None)
+                if self.load_content_checkbox.isChecked() or original is not None:
+                    binding_args['loadContents'] = self.load_content_checkbox.isChecked()
                 
             binding = module.CommandOutputBinding(**binding_args)
             # print(f"Binding is {save(binding)}")
@@ -742,12 +767,20 @@ class OutputDialog(BaseDialog):
             #     format={self.file_type_list_widget.getTags() if self.file_type_list_widget else None}""")
             # create fields 
         
+        # optional attributes are only written when set (no [] / false defaults)
+        secondary_files = (self.secondary_files_input.getData() if self.secondary_files_input else None) or None
+        streamable = None
+        if self.streamable_checkbox is not None:
+            streamable = True if self.streamable_checkbox.isChecked() else None
+            if streamable is None and getattr(getattr(self, 'output_parameter', None), 'streamable', None) is False:
+                streamable = False
+
         if self.output_parameter_type=='CommandOutputParameter':
             outputparameter=module.CommandOutputParameter(
                 id=self.id_input.text(), # can be many input types
                 label=self.label_input.text() or None,
-                secondaryFiles=self.secondary_files_input.getData() if self.secondary_files_input else None,
-                streamable=self.streamable_checkbox.isChecked() if self.streamable_checkbox else None, 
+                secondaryFiles=secondary_files,
+                streamable=streamable, 
                 doc=self.description_input.toPlainText() or None,
                 outputBinding=binding,
                 type_=output_type
@@ -756,8 +789,8 @@ class OutputDialog(BaseDialog):
             outputparameter=module.WorkflowOutputParameter(
                 id=self.id_input.text(), # can be many input types
                 label=self.label_input.text() or None,
-                secondaryFiles=self.secondary_files_input.getData() if self.secondary_files_input else None,
-                streamable=self.streamable_checkbox.isChecked() if self.streamable_checkbox else None, 
+                secondaryFiles=secondary_files,
+                streamable=streamable, 
                 doc=self.description_input.toPlainText() or None,
                 type_=output_type
             )
