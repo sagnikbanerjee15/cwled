@@ -68,6 +68,7 @@ class WorkbenchWindow(QMainWindow):
         self.sidebar.addRemoteFolderRequested.connect(self.onAddRemoteFolder)
         self.sidebar.syncRemoteFolderRequested.connect(self.controller.syncRemoteFolder)
         self.sidebar.remoteFolderOpened.connect(self.controller.loadRemoteFolder)
+        self.sidebar.remoteRescanRequested.connect(self.controller.syncRemoteFolderList)
         self.sidebar.currentFolderChanged.connect(self.onCurrentWorkspaceFolderChanged)
         self.sidebar.workspace_panel.followDocumentChanged.connect(
             lambda follow: follow and self.followCurrentDocument())

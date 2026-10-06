@@ -636,6 +636,7 @@ Back up `~/.ssh/config` before editing it for these checks.
 - [ ] **O-36** 🖥 Add as remote folder only `…/workflows` of a repository whose tools are in the sibling `tools/` folder, open a workflow → a message says it refers to files **outside** the remote folder (it lists some) and to add a parent folder; add the parent folder → it opens with its tools.
 - [ ] **O-37** Tools, **Validate** and the other commands on a workflow opened this way work (they need the tools on disk); **Save** uploads only the workflow (and the status bar says so), the tools that were copied are not uploaded unless you change them.
 - [ ] **O-38** 🖥 Open a remote workflow (the copies are kept in `~/Library/Application Support/…`, a folder with a space) and press **Save**: its `run:` paths are as they were (not `…/Application%20Support/…`), the steps show their tools, and the file on the instance still has `../../../tools/…`-style paths.
+- [ ] **O-39** 🖥 Click the **Rescan** button (the circular arrow next to the search field) with a remote folder in the workspace → the status bar says "Syncing host:/… …" and then how many files were copied; a file you added or changed **on the instance** (also in a sub-folder you had opened) shows up / is replaced, a sub-folder you never opened is not read. Without any remote folder the button works as before and the network is not touched.
 
 ### Afterwards
 

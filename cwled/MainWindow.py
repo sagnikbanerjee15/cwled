@@ -1248,6 +1248,11 @@ class MainWindow(WorkbenchWindow):
         for window in self.workbenchWindows():
             window.sidebar.workspace_panel.showLoadFailure(local_dir, why)
 
+    def syncRemoteFolderList(self, mirrors: list):
+        """Rescan in a Workspace panel: read these remote folders (their copies) again from their machines."""
+        for mirror in mirrors:
+            self.syncRemoteFolder(mirror)
+
     def syncRemoteFolders(self):
         if not self.remote.folders():
             QMessageBox.information(self._dialogParent(), "Sync Remote Folders",

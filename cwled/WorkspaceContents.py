@@ -94,6 +94,7 @@ class WorkspaceContents(QMainWindow):
     removeFolderRequested = pyqtSignal(str)  # "Remove from Workspace" on a workspace folder
     addRemoteFolderRequested = pyqtSignal()  # "Add a Remote Folder (SSH)" was chosen
     syncRemoteFolderRequested = pyqtSignal(str)  # "Sync from Remote" on the root of a remote folder
+    remoteRescanRequested = pyqtSignal(list)  # Rescan was clicked: the copies of remote folders in the workspace (to read again)
     remoteFolderOpened = pyqtSignal(str)  # a folder of a copy of a remote folder that was not read yet was expanded
     currentFolderChanged = pyqtSignal(str)  # workspace folder of the selected item
     showHiddenChanged = pyqtSignal(bool)    # the "show hidden folders" setting changed
@@ -425,7 +426,7 @@ class WorkspaceContents(QMainWindow):
                                                     self.on_sort_by_name)
         self.sort_by_time_btn = self._sidebarButton('clock-o', "Sort by date modified (click again to reverse)",
                                                     self.on_sort_by_time)
-        rescan_btn = self._sidebarButton('refresh', "Rescan the workspace", self.on_rescan_clicked)
+        rescan_btn = self._sidebarButton('refresh', "Rescan the workspace (the folders of remote machines are read again from them)", self.on_rescan_clicked)
         self.hidden_btn = self._sidebarButton('eye-slash', "Show the hidden folders (their name starts with a dot)",
                                               lambda checked: self.setShowHidden(checked), checkable=True)
         self.hidden_btn.setChecked(self.show_hidden)
@@ -1159,6 +1160,10 @@ class WorkspaceContents(QMainWindow):
         if self.workspace_folders:
             self.logger.debug(f"Rescanning workspace: {', '.join(self.workspace_folders)}")
             self.refresh()
+            # a folder of a remote machine is read again from the machine (what is here is a copy)
+            remote = [folder for folder in self.workspace_folders if folder in self.remote_labels]
+            if remote:
+                self.remoteRescanRequested.emit(remote)
         else:
             self.logger.warning("Cannot rescan - no workspace path set")
 

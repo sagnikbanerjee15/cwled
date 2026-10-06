@@ -771,3 +771,48 @@ def test_a_workflow_that_refers_out_of_the_folder_says_so(window, pipeline, monk
     monkeypatch.setattr(QMessageBox, 'warning', lambda parent, title, text, *args, **kwargs: warnings.append((title, text)))
     window.openDocument(str(mirror / '1.0.2' / 'wf-end_to_end.cwl'), host=window)
     assert warnings and 'outside the remote folder' in warnings[0][1] and 'Add the folder that contains them' in warnings[0][1]
+
+
+def child(panel, parent, name):
+    """The index of the entry ``name`` under ``parent``, looked for again: a refresh rebuilds the model and old indexes go stale."""
+    return next(panel.model.index(row, 0, parent) for row in range(panel.model.rowCount(parent))
+                if panel.model.index(row, 0, parent).data() == name)
+
+
+def tools_children(panel):
+    return children(panel, child(panel, remote_root(panel), 'tools'))
+
+
+def test_rescan_reads_the_remote_folders_again_from_their_machines(window, remote_dir):
+    """The refresh button of the panel only looked at the copy on this computer, so nothing that changed on the machine showed."""
+    window.remote.transportFor = lambda host: rf.LocalTransport()
+    folder = add(window.remote, 'dev-box', str(remote_dir))['folder']
+    window.addWorkspaceFolder(folder.mirror)
+    pump(4)
+    panel = window.sidebar.workspace_panel
+    panel.tree_view.expand(remote_root(panel))
+    panel.tree_view.expand(child(panel, remote_root(panel), 'tools'))
+    wait_until(lambda: tools_children(panel) == ['echo-copy.cwl'])
+    # what happens on the machine
+    (remote_dir / 'top-new.cwl').write_text('cwlVersion: v1.2\n')
+    (remote_dir / 'tools' / 'new-tool.cwl').write_text('cwlVersion: v1.2\n')
+    (remote_dir / 'echo.cwl').write_text('changed on the machine\n')
+    import os, time
+    later = time.time() + 60
+    os.utime(remote_dir / 'echo.cwl', (later, later))
+    asked = []
+    panel.remoteRescanRequested.connect(asked.append)
+    panel.on_rescan_clicked()                                   # the button
+    assert asked == [[str(Path(folder.mirror).resolve())]], "the remote roots are named"
+    wait_until(lambda: 'top-new.cwl' in children(panel, remote_root(panel)) and 'new-tool.cwl' in tools_children(panel),
+               message=f"{children(panel, remote_root(panel))} {tools_children(panel)}")
+    assert (Path(folder.mirror) / 'echo.cwl').read_text() == 'changed on the machine\n'
+    wait_until(lambda: 'copied' in (window.statusBar().currentMessage() or ''), message=window.statusBar().currentMessage())
+
+
+def test_rescan_of_a_workspace_without_remote_folders_asks_no_machine(window):
+    asked = []
+    window.sidebar.workspace_panel.remoteRescanRequested.connect(asked.append)
+    window.sidebar.workspace_panel.on_rescan_clicked()
+    pump(3)
+    assert asked == []

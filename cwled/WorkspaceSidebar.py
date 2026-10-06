@@ -120,6 +120,7 @@ class WorkspaceSidebar(QWidget):
     addRemoteFolderRequested = pyqtSignal()
     syncRemoteFolderRequested = pyqtSignal(str)
     remoteFolderOpened = pyqtSignal(str)
+    remoteRescanRequested = pyqtSignal(list)
     currentFolderChanged = pyqtSignal(str)
 
     def __init__(self, folders: List[str], parent=None):
@@ -169,6 +170,7 @@ class WorkspaceSidebar(QWidget):
         self.workspace_panel.addRemoteFolderRequested.connect(self.addRemoteFolderRequested)
         self.workspace_panel.syncRemoteFolderRequested.connect(self.syncRemoteFolderRequested)
         self.workspace_panel.remoteFolderOpened.connect(self.remoteFolderOpened)
+        self.workspace_panel.remoteRescanRequested.connect(self.remoteRescanRequested)
         self.pages.addWidget(self.workspace_panel)
 
         self.recent_panel = self.buildRecentList()
