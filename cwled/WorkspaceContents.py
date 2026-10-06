@@ -130,6 +130,7 @@ class WorkspaceContents(QMainWindow):
         self._cwl_folders = {}            # folder -> does it hold documents (valid until the tree is rebuilt)
         self.remote_labels = {}           # copy of a remote folder -> "host:/path" (see remoteFolders.py)
         self.remote_unfetched = lambda path: False   # is this folder of a remote copy not read from the machine yet?
+        self.remote_folder = lambda path: False      # is this a folder of a remote copy? (all of them are listed, whatever they hold)
         self._metadata_cache = {}         # file -> ((mtime, size), (class, version, format))
         self._watcher = QFileSystemWatcher(self)
         self._watcher.directoryChanged.connect(self._onFolderChanged)
@@ -859,6 +860,8 @@ class WorkspaceContents(QMainWindow):
             if item.rowCount() == 0:
                 self._addInfoRow(item, "Loading...")
             self.remoteFolderOpened.emit(item.data(ROLE_PATH))
+        elif item and item.data(ROLE_IS_DIRECTORY) and item.rowCount() == 0 and self.remote_folder(item.data(ROLE_PATH)):
+            self._addInfoRow(item, "No CWL documents")      # it is there on the machine: say why it shows nothing
 
         self._fitNameColumn()
 
@@ -881,6 +884,8 @@ class WorkspaceContents(QMainWindow):
         expanded = self._expandedPaths(index)
         item.removeRows(0, item.rowCount())
         self._load_directory_children(item, Path(str(path)))
+        if item.rowCount() == 0 and self.remote_folder(str(path)):
+            self._addInfoRow(item, "No CWL documents")
         item.setData(True, ROLE_IS_LOADED)
         self._restoreExpansion(expanded, index)
         self._fitNameColumn()
@@ -983,8 +988,8 @@ class WorkspaceContents(QMainWindow):
         Whether a directory or the folders below it hold any document. The answer
         is kept until the tree is rebuilt; folders that are not listed are skipped.
         """
-        if self.remote_unfetched(dir_path):
-            return True            # a folder of a remote machine that was not read yet: it may hold documents
+        if self.remote_folder(dir_path) or self.remote_unfetched(dir_path):
+            return True            # a folder of a remote machine is listed like the machine has it, empty or not
         known = self._cwl_folders.get(dir_path)
         if known is not None:
             return known

@@ -51,7 +51,7 @@ def remote_dir(tmp_path):
 
 
 def mirror_files(mirror: Path):
-    return sorted(str(path.relative_to(mirror)) for path in mirror.rglob('*') if path.is_file())
+    return sorted(str(path.relative_to(mirror)) for path in mirror.rglob('*') if path.is_file() and path.name != rf.INDEX_NAME)
 
 
 class FailingTransport(rf.Transport):
@@ -816,3 +816,149 @@ def test_rescan_of_a_workspace_without_remote_folders_asks_no_machine(window):
     window.sidebar.workspace_panel.on_rescan_clicked()
     pump(3)
     assert asked == []
+
+
+# ------------------------------------------------------------------------------------------------ what changed on the machine
+@pytest.fixture
+def tree(tmp_path):
+    """A remote folder with a folder that holds a folder, and two documents."""
+    base = tmp_path / 'remote' / 'proj'
+    (base / 'a' / 'b').mkdir(parents=True)
+    (base / 'z').mkdir()
+    for path in ('a/b/doc.cwl', 'a/top.cwl', 'z/z.cwl', 'root.cwl'):
+        shutil.copy(FIXTURES / 'echo.cwl', base / path)
+    return base
+
+
+def read_all(mirror, base, *levels):
+    return rf.pullLevels(rf.LocalTransport(), str(base), list(levels), mirror)
+
+
+def test_a_folder_that_is_renamed_on_the_machine_is_renamed_here_too(tmp_path, tree):
+    mirror = tmp_path / 'mirror'
+    read_all(mirror, tree, '')
+    read_all(mirror, tree, 'a', 'a/b')
+    assert mirror_files(mirror) == ['a/b/doc.cwl', 'a/top.cwl', 'root.cwl']
+    (tree / 'a').rename(tree / 'y')
+    result = read_all(mirror, tree, '', 'a', 'a/b')                  # what a sync reads: the first level and the opened folders
+    assert result.removed == 2 and not (mirror / 'a').exists(), "the old folder and what was in it are gone"
+    assert (mirror / 'y').is_dir() and list((mirror / 'y').iterdir()) == [], "the new name is there, to be read when it is opened"
+    assert (mirror / 'z').is_dir() and (mirror / 'root.cwl').is_file()
+    read_all(mirror, tree, 'y', 'y/b')
+    assert mirror_files(mirror) == ['root.cwl', 'y/b/doc.cwl', 'y/top.cwl'] and (mirror / 'y/b/doc.cwl').is_file()
+
+
+def test_a_document_renamed_or_deleted_on_the_machine_is_removed_here(tmp_path, tree):
+    mirror = tmp_path / 'mirror'
+    read_all(mirror, tree, '')
+    (tree / 'root.cwl').rename(tree / 'renamed.cwl')
+    result = read_all(mirror, tree, '')
+    assert mirror_files(mirror) == ['renamed.cwl'] and result.removed == 1 and result.files == 1
+
+
+def test_what_was_changed_or_made_here_is_never_removed(tmp_path, tree):
+    mirror = tmp_path / 'mirror'
+    read_all(mirror, tree, '', 'a', 'a/b')
+    (mirror / 'a' / 'top.cwl').write_text('edited here, not uploaded\n')               # changed here
+    (mirror / 'a' / 'made-here.cwl').write_text('cwlVersion: v1.2\n')                   # never on the machine (an upload that failed)
+    shutil.rmtree(tree / 'a')                                                          # the whole folder is gone there
+    result = read_all(mirror, tree, '', 'a', 'a/b')
+    assert mirror_files(mirror) == ['a/made-here.cwl', 'a/top.cwl', 'root.cwl'], mirror_files(mirror)
+    assert (mirror / 'a' / 'top.cwl').read_text() == 'edited here, not uploaded\n'
+    assert not (mirror / 'a' / 'b').exists(), "what was as copied is removed, with the folders that are empty then"
+    assert result.removed == 1
+
+
+def test_an_answer_that_was_cut_removes_nothing(tmp_path, tree, monkeypatch):
+    mirror = tmp_path / 'mirror'
+    read_all(mirror, tree, '')
+    (tree / 'root.cwl').unlink()
+    monkeypatch.setattr(rf, 'MAX_ENTRIES', 2)
+    for number in range(4):
+        (tree / f'extra-{number}.cwl').write_text('cwlVersion: v1.2\n')
+    result = read_all(mirror, tree, '')
+    assert result.truncated and (mirror / 'root.cwl').is_file(), "the list is not complete: what is not in it may only be missing from it"
+
+
+def test_which_side_changed_does_not_depend_on_the_clocks(tmp_path, tree):
+    import os, time
+    mirror = tmp_path / 'mirror'
+    read_all(mirror, tree, '')
+    # this computer's clock is ahead: the copy looks newer than what the machine changes later, but it was not changed here
+    future = time.time() + 3600
+    os.utime(mirror / 'root.cwl', (future, future))
+    (tree / 'root.cwl').write_text('changed on the machine\n')
+    os.utime(tree / 'root.cwl', (time.time() + 5, time.time() + 5))
+    result = read_all(mirror, tree, '')
+    assert (mirror / 'root.cwl').read_text() == 'changed on the machine\n' and result.files == 1 and not result.kept_local
+    # changed here, and the machine's clock is far ahead: the machine did not change it
+    (mirror / 'root.cwl').write_text('changed here\n')
+    os.utime(tree / 'root.cwl', (time.time() + 7200, time.time() + 7200))
+    result = read_all(mirror, tree, '')
+    assert (mirror / 'root.cwl').read_text() == 'changed here\n' and result.kept_local == ['root.cwl']
+
+
+def test_an_upload_is_what_the_machine_has_now(remote, tree):
+    folder = add(remote, 'dev-box', str(tree))['folder']
+    mirror = Path(folder.mirror)
+    (mirror / 'root.cwl').write_text('saved here and uploaded\n')
+    done = []
+    remote.uploaded.connect(lambda path, label: done.append(label))
+    remote.upload(mirror / 'root.cwl')
+    wait_until(lambda: done)
+    import hashlib
+    assert rf.MirrorIndex(mirror.resolve()).get('root.cwl') == hashlib.sha1(b'saved here and uploaded\n').hexdigest()
+    # somebody changes it on the machine: the next sync brings it, whatever the clocks say
+    (tree / 'root.cwl').write_text('changed on the machine afterwards\n')
+    import os
+    os.utime(mirror / 'root.cwl', (4_000_000_000, 4_000_000_000))                  # this copy "looks" far newer
+    seen = []
+    remote.synced.connect(lambda path, result: seen.append(result))
+    remote.sync(folder.mirror)
+    wait_until(lambda: seen)
+    assert (mirror / 'root.cwl').read_text() == 'changed on the machine afterwards\n'
+
+
+def test_a_renamed_folder_has_its_new_name_in_the_panel_after_a_rescan_and_the_old_one_is_gone(window, tree):
+    window.remote.transportFor = lambda host: rf.LocalTransport()
+    folder = add(window.remote, 'dev-box', str(tree))['folder']
+    window.addWorkspaceFolder(folder.mirror)
+    pump(4)
+    panel = window.sidebar.workspace_panel
+    panel.tree_view.expand(remote_root(panel))
+    panel.tree_view.expand(child(panel, remote_root(panel), 'a'))
+    wait_until(lambda: 'top.cwl' in children(panel, child(panel, remote_root(panel), 'a')))
+    (tree / 'a').rename(tree / 'renamed')
+    panel.on_rescan_clicked()
+    wait_until(lambda: 'renamed' in children(panel, remote_root(panel)), message=str(children(panel, remote_root(panel))))
+    wait_until(lambda: 'a' not in children(panel, remote_root(panel)), message=str(children(panel, remote_root(panel))))
+    panel.tree_view.expand(child(panel, remote_root(panel), 'renamed'))
+    wait_until(lambda: sorted(children(panel, child(panel, remote_root(panel), 'renamed'))) == ['b', 'top.cwl'],
+               message=str(children(panel, child(panel, remote_root(panel), 'renamed'))))
+
+
+def test_a_folder_without_documents_stays_in_the_panel_and_says_so(window, tmp_path):
+    base = tmp_path / 'remote' / 'proj'
+    (base / 'data' / 'raw').mkdir(parents=True)
+    (base / 'data' / 'notes.txt').write_text('no documents here')
+    (base / 'empty').mkdir()
+    shutil.copy(FIXTURES / 'echo.cwl', base / 'tool.cwl')
+    window.remote.transportFor = lambda host: rf.LocalTransport()
+    folder = add(window.remote, 'dev-box', str(base))['folder']
+    window.addWorkspaceFolder(folder.mirror)
+    pump(4)
+    panel = window.sidebar.workspace_panel
+    panel.tree_view.expand(remote_root(panel))
+    assert children(panel, remote_root(panel)) == ['data', 'empty', 'tool.cwl']
+    panel.tree_view.expand(child(panel, remote_root(panel), 'empty'))
+    wait_until(lambda: children(panel, child(panel, remote_root(panel), 'empty')) == ['No CWL documents'],
+               message=str(children(panel, child(panel, remote_root(panel), 'empty'))))
+    panel.tree_view.expand(child(panel, remote_root(panel), 'data'))
+    wait_until(lambda: children(panel, child(panel, remote_root(panel), 'data')) == ['raw'],
+               message=str(children(panel, child(panel, remote_root(panel), 'data'))))
+    # a rescan does not make them disappear: they are on the machine
+    panel.on_rescan_clicked()
+    pump(10)
+    wait_until(lambda: 'No CWL documents' in children(panel, child(panel, remote_root(panel), 'empty'))
+               or children(panel, remote_root(panel)) == ['data', 'empty', 'tool.cwl'])
+    assert children(panel, remote_root(panel)) == ['data', 'empty', 'tool.cwl']

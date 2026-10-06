@@ -33,8 +33,11 @@ import re
 import shlex
 import shutil
 import subprocess
+import hashlib
+import json
 import tarfile
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, List, Optional, Tuple
@@ -53,6 +56,8 @@ MAX_ENTRIES = 5000                                  # a folder with more documen
 CONNECT_TIMEOUT = 15
 CONFIG_KEY = 'remote_folders'
 PART_SUFFIX = '.cwled-part'
+INDEX_NAME = '.cwled-remote-index'                 # in a copy: what was last known to be on the machine
+IGNORED_FOLDERS = ('node_modules', '__pycache__')   # never listed (the hidden ones are not either)
 
 
 class RemoteError(Exception):
@@ -186,6 +191,7 @@ class PullResult:
     files: int = 0                                         # files copied (new or changed)
     unchanged: int = 0                                     # files that were up to date
     folders: int = 0                                       # sub-folders found (made here as empty folders)
+    removed: int = 0                                       # files that are gone from the machine (renamed, deleted) and were removed here
     kept_local: List[str] = field(default_factory=list)    # files changed here and not uploaded: left alone
     skipped: List[str] = field(default_factory=list)       # entries that were refused (unsafe or too large)
     truncated: bool = False                                # more than MAX_ENTRIES in a folder: the rest is not read
@@ -196,6 +202,8 @@ class PullResult:
             parts.append(f"{self.unchanged} up to date")
         if self.folders:
             parts.append(f"{self.folders} folder{'s' if self.folders != 1 else ''}")
+        if self.removed:
+            parts.append(f"{self.removed} removed (gone from the machine)")
         if self.kept_local:
             parts.append(f"{len(self.kept_local)} changed here, not overwritten")
         if self.skipped:
@@ -218,6 +226,7 @@ def _levelScript(path: str) -> str:
     return (f'cd -- {remoteExpr(path)} >/dev/null || exit 3\n'
             f'list=$(while IFS= read -r d; do\n'
             f'  [ -d "$d" ] || continue\n'
+            f'  printf "%s\\n" "$d"\n'
             f'  find "$d" -mindepth 1 -maxdepth 1 \\( \\( {folders} \\) -o \\( {files} \\) \\) 2>/dev/null\n'
             f'done | head -n {MAX_ENTRIES + 1})\n'
             f'[ -n "$list" ] || exit 0\n'
@@ -240,11 +249,13 @@ def pullLevels(transport: Transport, remote_path: str, folders: List[str], mirro
     Copy one level of some folders of a remote folder into ``mirror``: the documents they hold and
     their sub-folders (made here as empty folders, which are read when they are opened). ``folders``
     are relative to ``remote_path``; ``''`` is the folder itself. When a file differs on both sides
-    the newer one wins: a file that was changed here and could not be uploaded is kept, and a file
-    that was changed on the remote machine since is copied.
+    the one that changed since they were last the same wins (the newer one when both did): a file that
+    was changed here and could not be uploaded is kept, and a file that was changed on the remote machine
+    since is copied. What the machine no longer has (a folder or document that was renamed or deleted
+    there) is removed here, unless it was changed here.
     """
     wanted = ['.' if not folder else './' + folder.strip('/') for folder in folders if '\n' not in folder]
-    return _pull(transport, remote_path, _levelScript(remote_path), wanted, mirror, None)
+    return _pull(transport, remote_path, _levelScript(remote_path), wanted, mirror, None, prune=True)
 
 
 def pullFiles(transport: Transport, remote_path: str, files: List[str], mirror: Path) -> PullResult:
@@ -265,12 +276,203 @@ def _filesScript(path: str) -> str:
             f'printf "%s\\n" "$list" | tar -chf - --no-recursion -T -\n')
 
 
+class MirrorIndex:
+    """
+    What was last known to be on the machine for each file of a copy: the sha1 of its content, when it was copied from
+    the machine or written to it. A file is *changed here* when its content differs from that, *changed on the machine*
+    when what the machine has differs from it: that does not depend on the clocks of the two computers, and it is what
+    lets a file that is gone from the machine (renamed, deleted) be removed here only when nobody changed it here.
+    It is a hidden file in the copy (``INDEX_NAME``).
+    """
+    lock = threading.Lock()
+
+    def __init__(self, root: Path):
+        self.path = Path(root) / INDEX_NAME
+        self.files: Dict[str, str] = {}
+        self._set: Dict[str, str] = {}
+        self._removed: set = set()
+        try:
+            self.files = dict(json.loads(self.path.read_text(encoding='utf-8')).get('files') or {})
+        except (OSError, ValueError, AttributeError):
+            self.files = {}
+
+    def get(self, relative: str) -> Optional[str]:
+        return self.files.get(relative)
+
+    def set(self, relative: str, digest: str):
+        self.files[relative] = digest
+        self._set[relative] = digest
+        self._removed.discard(relative)
+
+    def discard(self, relative: str):
+        self.files.pop(relative, None)
+        self._set.pop(relative, None)
+        self._removed.add(relative)
+
+    def commit(self):
+        """Write what changed (merged with what another thread wrote meanwhile)."""
+        if not self._set and not self._removed:
+            return
+        with MirrorIndex.lock:
+            try:
+                current = dict(json.loads(self.path.read_text(encoding='utf-8')).get('files') or {})
+            except (OSError, ValueError, AttributeError):
+                current = {}
+            current.update(self._set)
+            for relative in self._removed:
+                current.pop(relative, None)
+            partial = self.path.with_name(self.path.name + PART_SUFFIX)
+            try:
+                partial.write_text(json.dumps({'files': current}, indent=0, sort_keys=True), encoding='utf-8')
+                os.replace(partial, self.path)
+            except OSError as e:
+                logger.warning(f"Cannot write {self.path}: {e}")
+        self._set, self._removed = {}, set()
+
+    @staticmethod
+    def record(root: Path, relative: str, digest: str):
+        """A file of the copy was written on the machine: that is what the machine has now."""
+        index = MirrorIndex(root)
+        index.set(relative, digest)
+        index.commit()
+
+
+def _sha1(body: bytes) -> str:
+    return hashlib.sha1(body).hexdigest()
+
+
+class _Puller:
+    """Reads the archive that a script sends and writes what is in it into a copy; then removes what is gone."""
+
+    def __init__(self, root: Path, result: PullResult, allowed: Optional[set], requested: Optional[List[str]]):
+        self.root, self.result, self.allowed = root, result, allowed
+        self.index = MirrorIndex(root)
+        self.requested = {name.strip('/').removeprefix('./').removeprefix('.') for name in (requested or [])} if requested else set()
+        self.present: set = set()                           # the requested folders that the machine has
+        self.listing: Dict[str, set] = {}                   # folder -> the names that the machine has in it
+        self.seen: set = set()
+
+    # -- what is sent ---------------------------------------------------------------------------------------------
+    def extract(self, archive: tarfile.TarFile, member: tarfile.TarInfo):
+        result, root = self.result, self.root
+        relative = _safeRelativePath(member.name)
+        if relative is None:
+            if member.isdir() and not PurePosixPath(member.name).is_absolute() \
+                    and all(part in ('', '.') for part in PurePosixPath(member.name).parts):
+                self.present.add('')                         # the folder itself ("./")
+            else:
+                result.skipped.append(member.name)
+            return
+        text = relative.as_posix()
+        target = root.joinpath(*relative.parts)
+        if member.isdir():
+            if not _inside(target, root) or target.is_symlink():
+                result.skipped.append(member.name)
+                return
+            if text in self.requested:
+                self.present.add(text)
+            parent = relative.parent.as_posix()
+            self.listing.setdefault('' if parent == '.' else parent, set()).add(relative.name)
+            if text not in self.seen:
+                self.seen.add(text)
+                target.mkdir(parents=True, exist_ok=True)
+                result.folders += 1
+            return
+        # a file that was asked for by name may have any suffix, otherwise only documents are taken
+        named = text in self.allowed if self.allowed is not None else text.lower().endswith(SUFFIXES)
+        if (not member.isreg() or not named or member.size > MAX_FILE_BYTES
+                or not _inside(target.parent, root) or target.is_symlink()):
+            result.skipped.append(member.name)       # not a plain document, or a link in the copy that leads elsewhere
+            return
+        parent = relative.parent.as_posix()
+        self.listing.setdefault('' if parent == '.' else parent, set()).add(relative.name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        body = archive.extractfile(member).read()
+        digest = _sha1(body)
+        if target.exists():
+            local = target.read_bytes()
+            if local == body:
+                result.unchanged += 1
+                self.index.set(text, digest)
+                return
+            base = self.index.get(text)
+            if base is not None:
+                changed_here, changed_there = _sha1(local) != base, digest != base
+                keep = changed_here and (not changed_there or target.stat().st_mtime > member.mtime)
+            else:
+                keep = target.stat().st_mtime > member.mtime          # nothing known: the newer file wins
+            if keep:
+                # changed here and not uploaded (the machine was not reached), or newer than what the machine has
+                result.kept_local.append(text)
+                return
+        partial = target.with_name(target.name + PART_SUFFIX)
+        partial.write_bytes(body)
+        os.replace(partial, target)
+        os.utime(target, (member.mtime, member.mtime))
+        self.index.set(text, digest)
+        result.files += 1
+
+    # -- what is gone ---------------------------------------------------------------------------------------------
+    def prune(self):
+        """
+        Remove, from the folders that were read, what the machine no longer has: a folder or document that was renamed
+        or deleted there. Only documents that are as they were copied (or written to the machine) are removed, and
+        folders only when they are empty then: what was changed here, or never copied, stays.
+        """
+        for level in sorted(self.requested):
+            base = self.root.joinpath(*PurePosixPath(level).parts) if level else self.root
+            if level not in self.present:
+                if level and base.is_dir() and not base.is_symlink():
+                    self._pruneTree(base)                   # the folder itself is gone
+                continue
+            names = self.listing.get(level, set())
+            try:
+                entries = list(os.scandir(base))
+            except OSError:
+                continue
+            for entry in entries:
+                if entry.name in names or entry.name.startswith('.') or entry.name in IGNORED_FOLDERS or entry.is_symlink():
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    self._pruneTree(Path(entry.path))
+                elif entry.is_file(follow_symlinks=False) and entry.name.lower().endswith(SUFFIXES):
+                    self._pruneFile(Path(entry.path))
+
+    def _pruneFile(self, path: Path):
+        relative = path.relative_to(self.root).as_posix()
+        base = self.index.get(relative)
+        if base is None:
+            return                                          # never copied from the machine: not ours to remove
+        try:
+            if _sha1(path.read_bytes()) == base:
+                path.unlink()
+                self.index.discard(relative)
+                self.result.removed += 1
+        except OSError:
+            pass
+
+    def _pruneTree(self, folder: Path):
+        for current, folders, files in os.walk(folder, topdown=False, followlinks=False):
+            for name in files:
+                path = Path(current) / name
+                if not name.startswith('.') and name.lower().endswith(SUFFIXES) and not path.is_symlink():
+                    self._pruneFile(path)
+            try:
+                os.rmdir(current)                           # only if it is empty now
+            except OSError:
+                pass
+
+    def finish(self):
+        self.index.commit()
+
+
 def _pull(transport: Transport, remote_path: str, script: str, wanted: List[str], mirror: Path,
-          allowed: Optional[set]) -> PullResult:
+          allowed: Optional[set], prune: bool = False) -> PullResult:
     result = PullResult()
     mirror = Path(mirror)
     mirror.mkdir(parents=True, exist_ok=True)
     root = mirror.resolve()
+    puller = _Puller(root, result, allowed, wanted if prune else None)
     with tempfile.TemporaryFile() as errors:
         process = transport.popen(script, stdin=subprocess.PIPE, stderr=errors)
         count = 0
@@ -287,7 +489,7 @@ def _pull(transport: Transport, remote_path: str, script: str, wanted: List[str]
                         if count > MAX_ENTRIES:
                             result.truncated = True
                             break
-                        _extractMember(archive, member, root, result, allowed)
+                        puller.extract(archive, member)
             except tarfile.ReadError as e:
                 if 'empty' not in str(e).lower():
                     raise RemoteError(f"{transport.describe()} did not send a list of files ({e}). Does a "
@@ -297,11 +499,16 @@ def _pull(transport: Transport, remote_path: str, script: str, wanted: List[str]
             process.wait()
             errors.seek(0)
             message = errors.read().decode('utf-8', errors='replace').strip()
+    complete = process.returncode == 0 and not result.truncated
     if process.returncode != 0 and not result.truncated:
+        puller.finish()
         if process.returncode == 3:
             raise RemoteError(f"The folder {remote_path} cannot be opened on {transport.describe()}"
                               + (f": {message}" if message else ""))
         raise RemoteError(transport.failure(process.returncode, message))
+    if prune and complete:
+        puller.prune()                                      # only from a complete answer: a cut one lists too little
+    puller.finish()
     return result
 
 
@@ -312,44 +519,6 @@ def _inside(path: Path, root: Path) -> bool:
     except (OSError, RuntimeError):
         return False
     return resolved == root or root in resolved.parents
-
-
-def _extractMember(archive: tarfile.TarFile, member: tarfile.TarInfo, root: Path, result: PullResult,
-                   allowed: Optional[set] = None):
-    relative = _safeRelativePath(member.name)
-    if relative is None:
-        result.skipped.append(member.name)
-        return
-    target = root.joinpath(*relative.parts)
-    if member.isdir():
-        if not _inside(target, root) or target.is_symlink():
-            result.skipped.append(member.name)
-            return
-        target.mkdir(parents=True, exist_ok=True)
-        result.folders += 1
-        return
-    # a file that was asked for by name may have any suffix, otherwise only documents are taken
-    named = str(relative) in allowed if allowed is not None else str(relative).lower().endswith(SUFFIXES)
-    if (not member.isreg() or not named or member.size > MAX_FILE_BYTES
-            or not _inside(target.parent, root) or target.is_symlink()):
-        result.skipped.append(member.name)       # not a plain document, or a link in the copy that leads elsewhere
-        return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    body = archive.extractfile(member).read()
-    if target.exists():
-        if target.read_bytes() == body:
-            result.unchanged += 1
-            return
-        if target.stat().st_mtime > member.mtime:
-            # changed here after the remote file was written, and not uploaded (or the machine
-            # was not reached): the newer file wins
-            result.kept_local.append(str(relative))
-            return
-    partial = target.with_name(target.name + PART_SUFFIX)
-    partial.write_bytes(body)
-    os.replace(partial, target)
-    os.utime(target, (member.mtime, member.mtime))
-    result.files += 1
 
 
 def pushFile(transport: Transport, local: Path, remote_path: str):
@@ -365,6 +534,7 @@ def pushFile(transport: Transport, local: Path, remote_path: str):
               f'if [ -e "$p" ]; then cp -p -- "$p" "$tmp" || exit 4; fi\n'
               f'cat > "$tmp" && mv -f -- "$tmp" "$p" || {{ rm -f -- "$tmp"; exit 5; }}\n')
     transport.run(script, stdin=body, timeout=120)
+    return _sha1(body)           # what the machine has now
 
 
 # ------------------------------------------------------------------------------------------------ what a document refers to
@@ -582,6 +752,10 @@ class RemoteFolders(QObject):
                 return key, folder, text[len(key) + 1:].replace(os.sep, '/')
         return None
 
+    def isRemotePath(self, local_path) -> bool:
+        """True for a folder or file of the copy of a remote folder (compared as it is, like ``isUnfetched``)."""
+        return self._locate(local_path) is not None
+
     def isUnfetched(self, local_dir) -> bool:
         """
         True for a folder of a copy that has not been read from the machine in this session: what is
@@ -765,7 +939,10 @@ class RemoteFolders(QObject):
         remote = folder.remotePathOf(local_path)
 
         def work():
-            pushFile(self.transportFor(folder.host), Path(local_path), remote)
+            digest = pushFile(self.transportFor(folder.host), Path(local_path), remote)
+            # the machine has this now: a later sync tells what changed there since by comparing with it
+            mirror = Path(folder.mirror).resolve()
+            MirrorIndex.record(mirror, Path(local_path).resolve().relative_to(mirror).as_posix(), digest)
 
         def done(_result, error):
             again = self._uploading.pop(key, False)

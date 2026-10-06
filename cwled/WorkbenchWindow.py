@@ -173,6 +173,7 @@ class WorkbenchWindow(QMainWindow):
         remote = getattr(self.controller, 'remote', None)
         if remote is not None:
             self.sidebar.workspace_panel.remote_unfetched = remote.isUnfetched
+            self.sidebar.workspace_panel.remote_folder = remote.isRemotePath
             self.sidebar.setRemoteLabels(remote.labels())
 
     def onAddRemoteFolder(self):

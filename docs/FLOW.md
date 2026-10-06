@@ -856,7 +856,10 @@ dependenciesFetched → the panels refresh;  _warnAboutReferences(): files that 
 outside the remote folder;  then MainWindow._openDocumentNow() (always: the document is opened even if it may not load)
 
 Sync from Remote → RemoteFolders.sync() → pullLevels() again for the first level and the folders that were read:
-where a file differs on both sides the newer wins
+where a file differs on both sides what changed since they were last the same wins (the newer when both did):
+the hidden file .cwled-remote-index of a copy keeps the sha1 of each document as it was last copied from / written to the
+machine (MirrorIndex); with it, and from a complete answer only, _Puller.prune() removes what the machine no longer has
+(a renamed or deleted folder or document, unless it was changed here or never was on the machine)
 ```
 
 `Transport` runs a shell script on a machine: `SshTransport` is the `ssh` program (`BatchMode`, so it never asks for a password), `LocalTransport` runs the same scripts in a local shell, which is what the tests do (`pytests/test_remote_folders.py`). The list is kept in the configuration as `remote_folders` (`host`, `path`, `mirror`, `synced`); the copies live under `platformdirs.user_data_path('cwled')/remote/<host>/<path>`.
