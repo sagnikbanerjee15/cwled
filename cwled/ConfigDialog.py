@@ -114,6 +114,11 @@ class ConfigDialog(QDialog):
         self.show_splash_check.setChecked(bool(self.config.get('show_splash', True)))
         layout.addWidget(self.show_splash_check)
         
+        # Check the document while typing in the Code tab (the Problems panel)
+        self.live_validation_check = QCheckBox("Check the document while typing in the Code tab (Problems panel)")
+        self.live_validation_check.setChecked(bool(self.config.get('live_validation', True)))
+        layout.addWidget(self.live_validation_check)
+        
         # Window size settings
         window_size_group = QGroupBox("Window Size")
         window_size_layout = QGridLayout()
@@ -634,6 +639,7 @@ class ConfigDialog(QDialog):
         
         self.config['restore_session'] = self.restore_session_check.isChecked()
         self.config['show_splash'] = self.show_splash_check.isChecked()
+        self.config['live_validation'] = self.live_validation_check.isChecked()
         self.config['theme'] = self.theme_combo.currentText()
         
         # Make sure main_window dictionary exists

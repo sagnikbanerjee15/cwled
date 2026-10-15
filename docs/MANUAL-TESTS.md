@@ -11,7 +11,7 @@ Each item reads: *what to do* → *what should happen*. Tick it when it does. No
 ## How to use this list
 
 1. Start with section **A** (things only real hardware can confirm), then go through the sections of
-   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, **O** the remote folders over SSH (only on the `ssh-remote-folders` branch), **P** the logo that shows at the start, **U** running a document from the editor, and **T** the tests and documentation.
+   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, **O** the remote folders over SSH (only on the `ssh-remote-folders` branch), **P** the logo that shows at the start, **U** running a document from the editor, **V** the Problems panel, live checks and autocompletion of the Code tab, and **T** the tests and documentation.
 2. Use a scratch copy of the test documents, so that saving never touches the repository (outside the temporary directory, see below):
 
    ```bash
@@ -740,6 +740,35 @@ Use a copy of the test documents (see *How to use this list*) for the runs that 
 - [ ] **U-22** 🖥 With a long run going, the other documents of the window still respond (their tabs, menus and dialogs); only the document that is running is blocked by the Run dialog.
 - [ ] **U-23** 🖥 A packaged build (`make debug-mac`): **Run** `echo.cwl` → it finishes like in **U-09**, and no second CWLed window opens.
 - [ ] **U-24** Known gaps (do not report): from the packaged build, **Cancel** stops cwltool itself but not necessarily the tools it started (a source build stops the whole process group, see **U-19**); for a Docker tool, check that its container has stopped after **Cancel**; runs are local only (a document of a remote folder is run from its local copy).
+
+## V. Problems panel, live validation, autocompletion
+
+The **Code** tab of a document now has a **Problems** panel below the editor: the messages of the last check, each with its line (the header counts them, for example *Problems (3)*). While the Code tab is shown, the text is checked 1.5 s after the last edit, in the background (the lines with a problem are underlined in red); the **Check** button checks at once. Words of CWL are offered while you type (after two letters) and with **Ctrl+Space**. The setting is **Tools → Configuration → General → Check the document while typing in the Code tab**.
+The automated tests (`pytests/test_problems_panel.py`) cover the parser, the quiet time, the results of earlier texts, the setting and the clicks; the checks below are what a real screen shows.
+
+- [ ] **V-01** 🖥 Open `tests/01-hello-world.cwl`, go to the **Code** tab → below the editor a **Problems (0)** header and the note *No problems found.* (within about two seconds). The panel is at the bottom, the editor above it still gets the height.
+- [ ] **V-02** In the Code tab, change `type: string` (line 11) to `type: strin` and stop typing → after about 1.5 s the header reads **Problems (1)** and lists *Line 11: Field 'type' references unknown identifier 'strin' …* (the line of `type:`); that line is underlined in red.
+- [ ] **V-03** Keep typing without a pause: the list keeps its previous result; it changes about 1.5 s after the last key, not while you type.
+- [ ] **V-04** 🖥 Click the entry → the cursor goes to that line and the editor has the focus; the line is visible even when it is far down the document.
+- [ ] **V-05** Put `string` back → after the pause the header reads **Problems (0)** and the note *No problems found.*; the red underline is gone.
+- [ ] **V-06** Select all in the editor and delete it → after the pause a message *I'm sorry, I couldn't load this CWL file …* is listed **without** a line number; clicking it does not move the cursor.
+- [ ] **V-07** Click the **Problems (n)** header → the list folds away and only the header stays; click again → it comes back.
+- [ ] **V-08** A syntax error: type `baseCommand: [echo` (unclosed bracket) on a new line → the list shows a message with the line of the error; nothing is shown as a dialog (the error does not open a window).
+- [ ] **V-09** **Tools → Configuration → General**: untick *Check the document while typing in the Code tab (Problems panel)*, press OK. Type an error in the Code tab and wait 5 s → the list does not change and no underline appears. Press **Check** → the result appears. Tick the box again and press OK → typing is checked again.
+- [ ] **V-10** Go to the **App Info** tab and change the label, wait 5 s, then go to the **Code** tab → the panel is updated about 1.5 s after the tab is shown (the check starts when the tab is shown, not while another tab is in front).
+- [ ] **V-11** 🖥 Type quickly in a long document (the largest workflow you have) with the Code tab in front → typing and scrolling do not stutter visibly while a check runs (the check is in the background; a short pause while it runs is acceptable, a freeze is a bug).
+- [ ] **V-12** Type invalid text several times in a row → no modal error dialog opens at any time; the messages only appear in the panel.
+- [ ] **V-13** 🖥 Autocompletion: in the Code tab, on an empty line, type `cl` → after the second letter a list opens with *class*, *CommandLineTool* …; arrows choose, Enter inserts the word, Escape closes the list.
+- [ ] **V-14** 🖥 **Ctrl+Space** (Command+Space on the Mac is the system's Spotlight; use **Control+Space** there) on an empty line → the list of words opens. If the Mac's input-source shortcut takes Control+Space, the list does not open: note it and use the shortcut from System Settings → Keyboard instead (not a CWLed bug).
+- [ ] **V-15** Toggle **JSON** in the Code tab: the autocompletion still offers the words; an error typed in JSON (for example a missing comma) is reported on the line of the JSON text (click the entry → the cursor lands on that line of the JSON).
+- [ ] **V-16** A workflow whose step refers to a tool next to it (`run: echo.cwl`, as `tests/50-workflow.cwl`) → no *file does not exist* message in the panel; the workflow's file is checked as a whole.
+- [ ] **V-17** Check the folder of the document after a few checks (Finder with **Cmd+Shift+.** shows hidden files, or `ls -a` in Terminal) → no `.cwled-check-…cwl` file is left behind.
+- [ ] **V-18** A new document (**File → New**, not saved yet) → typing an error shows the messages in the panel; nothing is written in your workspace folder or home folder (the check uses the temporary folder).
+- [ ] **V-19** A document in a folder you cannot write to (a read-only folder, a volume that is locked) → the checks still run and show their messages; the copy goes to the temporary folder.
+- [ ] **V-20** The **Tools → Validate** menu item still opens its dialog as before; the Problems panel is not changed by it (it is a separate check; a known gap, see the note in the User guide).
+- [ ] **V-21** A document in a **detached** window (drag its tab out) → its Code tab has its own panel, checks in that window, and clicks move that window's cursor.
+- [ ] **V-22** 🖥 In each of the five themes (Composer Dark, Light, Midnight, Nord, Solarized Light) the panel, its header and the red underline are readable; the error text of the list is not cut off at the window's width.
+- [ ] **V-23** Type an error, and quit (**Cmd/Ctrl+Q**) or close the window within a second of the last key, while the check runs → the application closes without hanging and without an error dialog.
 
 ---
 

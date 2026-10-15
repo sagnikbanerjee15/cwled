@@ -37,6 +37,8 @@ The architecture of CWLed is designed for flexibility, catering to both visual-o
     - [Expression Editor](#expression-editor)
     - [Command Line Preview](#command-line-preview)
   - [Code Tab](#code-tab)
+    - [Problems Panel and Live Checks](#problems-panel-and-live-checks)
+    - [Autocompletion](#autocompletion)
 - [Workflow Editor](#workflow-editor)
   - [App Info Tab](#app-info-tab-1)
   - [Visual Editor Tab](#visual-editor-tab-1)
@@ -385,6 +387,23 @@ The Code tab provides a direct, unfiltered view of the raw CWL document. It is a
 
 This tab is indispensable for power users who want to make precise changes, use advanced CWL features not exposed in the GUI, or simply inspect the generated code. Any changes made in the App Info or Visual Editor tabs are instantly reflected in the Code tab, and conversely, any valid edits made in the Code tab will immediately update the other two tabs. This seamless, two-way synchronization ensures that the visual editors and the underlying code are always in perfect harmony, offering the best of both worlds: the simplicity of a GUI and the power of a code editor.
 
+### Problems Panel and Live Checks
+
+Below the editor, the **Problems** panel lists the messages about the document, each with the line it is about. The header counts them (*Problems (3)*); its arrow folds the list away.
+
+- Click a message to move the cursor to its line. A message without a line (for example *I'm sorry, I couldn't load this CWL file* for an empty document) is listed without a line and does not move the cursor.
+- The lines with a problem are underlined in red in the editor.
+- **Check** validates the document at once.
+
+While the Code tab is shown, the document is checked 1.5 seconds after you stop typing, in the background, so typing is not interrupted. The check is the validation of **Tools → Validate** (cwltool), run on the text of the editor rather than on the saved file, so it sees what you have typed. Checks run only while the Code tab is in front: when you come back to it, the document is checked after a short pause.
+The automatic checks are switched off by *Check the document while typing in the Code tab* in the [General tab](#general-tab) of the configuration; the **Check** button still checks.
+
+A check writes a hidden copy of the text next to the document (`.cwled-check-….cwl`, so that the tools it refers to resolve) and removes it straight after. An unsaved document is checked in the temporary folder. The **Tools → Validate** menu item keeps its own dialog; it does not fill the panel (a known gap).
+
+### Autocompletion
+
+In the Code tab a list of CWL words opens after you type two letters, and **Ctrl+Space** opens it at any time (Control+Space on the Mac). The list holds the names of the CWL classes (*CommandLineTool*, *Workflow*, *DockerRequirement* …) and of the fields of the documents (*inputs*, *outputs*, *baseCommand*, *valueFrom* …). The arrow keys choose a word, Enter inserts it and Escape closes the list. It offers names only, not the values a field accepts. It works in JSON too.
+
 
 # Workflow Editor
 
@@ -463,6 +482,8 @@ The Code tab provides a direct, real-time view of the raw CWL source code that i
 *Syntax Highlighting*: The editor supports both YAML and JSON, providing clear syntax highlighting to improve readability.
 *Two-Way Synchronization*: This is a key feature. Any action you take in the Visual Editor tab—such as adding a step or connecting nodes—is instantly translated into CWL code that appears here. Conversely, if you are a power user and make a valid change directly in the code, the graphical view in the Visual Editor tab will update to reflect that change. This provides the ultimate flexibility, combining the ease of a GUI with the full power of direct code editing.
 
+*Problems and autocompletion*: the same as for command line tools, see [Problems Panel and Live Checks](#problems-panel-and-live-checks).
+
 
 # Dialogs
 
@@ -538,6 +559,7 @@ This tab contains basic application settings.
 *   **Theme**: The colour [theme](#themes) of the application. It is applied as soon as you press OK.
 *   **Reopen the documents and windows of the last session at start**: When on (the default) the documents that were open when you quit, the windows tabs were torn off into and their positions are restored at the next start.
 *   **Show the logo while CWLed starts**: When on (the default) the [logo window](#the-logo) shows while the application starts.
+*   **Check the document while typing in the Code tab (Problems panel)**: When on (the default) the document is checked 1.5 seconds after the last edit while the Code tab is shown, and the [Problems panel](#problems-panel-and-live-checks) lists the messages. When off, nothing is checked by itself; the **Check** button of the panel still checks.
 *   **Window Size**: Set the initial width and height of the main application window. The window is never opened larger than the screen.
 
 ## Logging Tab

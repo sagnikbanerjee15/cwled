@@ -16,6 +16,7 @@ import jinja2
 from typing import Union, Any
 from widgets.qButtons import ErrorDialog
 from CWLparser import Parser
+from liveValidation import LiveValidation
 # Import just the save function from our utility module
 from cwl_utils_handler import save,get_cwl_module
 from qErrorMessage import QErrorMessage
@@ -165,6 +166,9 @@ class CodeWindow( QWidget):
         layout.addWidget(container_widget3)  # No alignment to allow stretching
         layout.addWidget(container_widget2, alignment=Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self.editor)
+        # the Problems panel below the editor: live validation and autocompletion (liveValidation.py)
+        self.live_validation = LiveValidation(self)
+        layout.addWidget(self.live_validation.panel)
         self.setLayout(layout)
 
     def convert_multiline_strings(self, obj):
@@ -537,6 +541,7 @@ class CodeWindow( QWidget):
                 # lexer.setDefaultFont(QFont("Courier", 16))
                 self.editor.setLexer(lexer)
                 theme.styleCodeEditor(self.editor, lexer)
+                self.live_validation.attachAutocompletion(lexer)
             if self.format == 'JSON':
                 lexer = QsciLexerJavaScript()
                 # lexer.setDefaultFont(QFont("Courier", 16))
@@ -545,6 +550,7 @@ class CodeWindow( QWidget):
                     lexer.setFont(editor_font, style)
                 self.editor.setLexer(lexer)
                 theme.styleCodeEditor(self.editor, lexer)
+                self.live_validation.attachAutocompletion(lexer)
                 text= json.dumps(cwl_text, indent=3)
             self.logger.debug(f"Sending {text} to the editor")
             # Save scroll and cursor position before replacing text

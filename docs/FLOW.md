@@ -9,6 +9,7 @@
 - [Signal Flow Architecture](#signal-flow-architecture)
 - [Tab Synchronization Mechanism](#tab-synchronization-mechanism)
 - [Data Flow Patterns](#data-flow-patterns)
+- [Live Validation and the Problems Panel](#live-validation-and-the-problems-panel)
 - [Dialog System](#dialog-system)
 - [Running a Document](#running-a-document)
 - [Remote Folders](#remote-folders)
@@ -653,6 +654,47 @@ Writes to file in JSON or YAML format
     ↓
 If track_version=True: Git commit and tag
 ```
+
+## Live Validation and the Problems Panel
+
+**Location**: `liveValidation.py` (`LiveValidation`: the checks, the markers, the autocompletion), `ProblemsPanel.py` (the panel widget), `problems.py` (`parseProblems()`: the messages of the validator as `Problem`s, no Qt), `cwlKeywords.py` (the words of the autocompletion, data only).
+
+**Hooks in existing code** (kept small): `TabCodeEditor.CodeWindow.initUI()` creates `LiveValidation(self)` and puts `live_validation.panel` under the editor; `populateFromCWL()` calls `attachAutocompletion(lexer)` in each branch after the lexer is set; `ConfigDialog` has the checkbox `live_validation` (General tab); `resources/config/cwled.yaml` has the default `live_validation: true`.
+
+**Data**: `Problem(message, line, column, path)` (`line` is `None` for a message without a line of this document, or about another file); `ValidationRun(valid, problems)`.
+
+```
+keystroke in the editor → editor.textChanged → LiveValidation._onTextChanged()
+    revision += 1, dirty = True
+    timer.start(DEBOUNCE_MS) only if the setting is on AND the Code tab is visible
+Code tab shown (QEvent.Show) while dirty → the same timer
+timer timeout (quiet for 1.5 s) → _onQuiet() → _requestRun()
+    busy? → pending = True             (one check at a time)
+    else _start(): snapshot (revision, editor.text(), document path)
+                   → thread "cwled-live-validation"
+worker thread: validateText(text, document)
+    write .cwled-check-<id>.cwl next to the document (temporary folder if none)
+    CWLRunner().validate(copy)   (cwltool --validate; cwltool logs kept from the root logger)
+    stderr → parseProblems(stderr, source=copy name) → copy name replaced by the document name
+    _Results.done.emit((revision, run))                    (queued to the GUI thread)
+GUI thread: _onResult(revision, run)
+    busy = False
+    revision == current?  yes → _show(run): ProblemsPanel.setProblems(), red squiggle on the lines
+                          no  → dropped (an earlier text)
+    pending? → _start() again on the current text
+panel: item clicked → ProblemsPanel.jumpRequested(line) → LiveValidation.jumpToLine(line)
+panel: Check pressed → ProblemsPanel.checkRequested → checkNow()   (runs whatever the setting says)
+populateFromCWL(): setLexer(lexer) → attachAutocompletion(lexer): QsciAPIs(lexer) ← completionWords()
+    Ctrl+Space / Meta+Space → autoCompleteFromAPIs();  two letters → AcsAPIs threshold 2
+```
+
+**Rules that keep the editor responsive and correct**:
+- The check never runs in the GUI thread, and never overlaps another one of its own. A request made during a check (a pause, the Check button) is kept as `_pending` and started when the result has been handled.
+- A result is shown only when its revision is the current one (`_revision` counts the edits). A result for an earlier text is dropped; the edits that made it stale have already restarted the timer.
+- The check is run only while the Code tab is visible (`isVisible()`); a change made while hidden leaves `_dirty` set, and the `QEvent.Show` of the tab starts the timer.
+- cwltool logs its errors on its own loggers (`cwltool`, `salad`). While a check runs their propagation is off, so the `ErrorDialogHandler` on the root logger does not open a dialog for an invalid document; the messages come from the run's own buffer instead. `_CWLTOOL_LOCK` keeps two in-process cwltool runs apart.
+- The lexer is kept by `LiveValidation._lexer`: QScintilla forgets a lexer whose Python object is gone, and `QsciAPIs` needs the lexer alive.
+- The `validate` callable is injected (`LiveValidation(codeWindow, validate=...)`), so the tests run the debounce and the stale-result rule with fakes.
 
 ## Dialog System
 

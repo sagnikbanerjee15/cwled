@@ -16,6 +16,8 @@ remote_folders: []
 restore_session: true
 # Show the logo while the application starts (also --no-splash, or CWLED_NO_SPLASH in the environment)
 show_splash: true
+# Check the document in the Code tab 1.5 s after the last edit; the messages go to the Problems panel
+live_validation: true
 # What was open when the application was closed (managed by the application)
 session: {}
 # Workspace panel: list the folders whose name starts with a dot; select the open document in the list
