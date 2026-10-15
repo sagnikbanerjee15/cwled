@@ -51,7 +51,7 @@ Before using CWLed, make sure the following are installed on your system:
 
 > **Note:** When installing from source (see below), Python dependencies are managed and installed automatically via `uv` using the `pyproject.toml` file. The macOS `.dmg` bundle and Linux executable do **not** include `cwltool`, `node` — install them separately and make sure they are included in the PATH of the system.
 
-`cwltool` is necessary to run workflows and tools for testing and debugging purposes.
+`cwltool` is necessary to run workflows and tools for testing and debugging purposes. It uses `node` to run and validate tools with JavaScript expressions (the Expression Editor does not need it).
 
 
 ## Installation
