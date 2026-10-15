@@ -72,6 +72,19 @@ Check the corresponding section in README.md
 
 Check the corresponding section in README.md
 
+The model is set under `llm` in the configuration (`provider`, `LLMModel`, and `api_key_env`, the name of the environment variable that holds the API key). The key is read from that variable, or from the `cwled.env` file in the configuration folder.
+
+## Fix with AI
+
+When **Validate tool** reports errors, its dialog has a **Fix with AI** button, and so does **Tools → Suggest a fix for the validation errors** (which validates the document first and says so if it is valid). CWLed then:
+
+1. checks that a model is configured and has its key; if not, it shows the same message as Troubleshoot and stops;
+2. asks you to confirm: *The document and the validation errors will be sent to provider/model.* Nothing is sent before **Send**; **Cancel** sends nothing. The document sent is the Code tab text, unsaved changes included;
+3. asks the model in the background, with a busy indicator and a **Cancel** button (the window keeps working; an answer that comes after **Cancel** is ignored);
+4. shows the suggested document next to the Code tab text in the comparison view. **Apply** puts the suggestion into the Code tab and marks the document as modified; **Undo** in the Code tab takes it back in one step. **Discard** leaves the document as it was. Nothing changes without **Apply**.
+
+If the answer holds no CWL document (with a `class`) that can be read, CWLed says *The answer could not be used.* and shows the answer under **Details**.
+
 # Usage
 
 If you choose to run from command line, navigate to the cwled folder and run:
@@ -616,7 +629,9 @@ The application provides four menus: **File**, **Tools**, **Window** and **Help*
 
 ## Tools Menu
 
-- **Validate tool**: Validates the current CWL document using `cwltool --validate` (or another validator specified in your configuration). Reports any syntax errors or schema violations.
+- **Validate tool**: Validates the current CWL document using `cwltool --validate` (or another validator specified in your configuration). Reports any syntax errors or schema violations. Its error dialog has a **Fix with AI** button (see [Fix with AI](#fix-with-ai)).
+
+- **Suggest a fix for the validation errors**: Validates the current document; when it does not validate, goes straight to [Fix with AI](#fix-with-ai), and when it does, says so.
 
 - **Run tool/workflow...**: Runs the current document with cwltool and shows its log and result in a Run dialog (see [Running a Document](#running-a-document)).
 

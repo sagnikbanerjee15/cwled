@@ -11,7 +11,7 @@ Each item reads: *what to do* → *what should happen*. Tick it when it does. No
 ## How to use this list
 
 1. Start with section **A** (things only real hardware can confirm), then go through the sections of
-   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, **O** the remote folders over SSH (only on the `ssh-remote-folders` branch), **P** the logo that shows at the start, **U** running a document from the editor, **V** the Problems panel, live checks and autocompletion of the Code tab, and **T** the tests and documentation.
+   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, **O** the remote folders over SSH (only on the `ssh-remote-folders` branch), **P** the logo that shows at the start, **U** running a document from the editor, **V** the Problems panel, live checks and autocompletion of the Code tab, **W** Fix with AI for validation errors, and **T** the tests and documentation.
 2. Use a scratch copy of the test documents, so that saving never touches the repository (outside the temporary directory, see below):
 
    ```bash
@@ -769,6 +769,62 @@ The automated tests (`pytests/test_problems_panel.py`) cover the parser, the qui
 - [ ] **V-21** A document in a **detached** window (drag its tab out) → its Code tab has its own panel, checks in that window, and clicks move that window's cursor.
 - [ ] **V-22** 🖥 In each of the five themes (Composer Dark, Light, Midnight, Nord, Solarized Light) the panel, its header and the red underline are readable; the error text of the list is not cut off at the window's width.
 - [ ] **V-23** Type an error, and quit (**Cmd/Ctrl+Q**) or close the window within a second of the last key, while the check runs → the application closes without hanging and without an error dialog.
+
+## W. Fix with AI
+
+The automated tests (`pytests/test_fix_with_ai.py`) replace the model by a stand-in, so they send nothing and need no key.
+The items marked 🖥 need a real display, and those that send the document need a configured model: its provider and
+model in the `llm` section of the configuration, and its API key in the environment or in `cwled.env`.
+Use a scratch copy of `tests/echo.cwl` for the items that break the document.
+
+### The entries
+
+- [ ] **W-01** 🖥 In the Code tab of a scratch copy of `tests/echo.cwl`, change `type: string` under `outputs` to `type: strinq`
+      and do **not** click **Update**. **Tools → Validate tool** → the error dialog "This tool cannot be validated" lists the
+      validator's messages and has a **Fix with AI** button above **OK**.
+- [ ] **W-02** **Tools → Suggest a fix for the validation errors** on `tests/echo.cwl` (valid) → "The document is valid: there is
+      nothing to fix." and no consent is asked.
+- [ ] **W-03** **Tools → Suggest a fix for the validation errors** on the document of W-01 → the consent of W-05 opens at once
+      (no second click on the error dialog).
+- [ ] **W-04** 🖥 **Tools** menu: "Suggest a fix for the validation errors" is right below "Validate tool".
+
+### Consent and the request
+
+- [ ] **W-05** 🖥 The consent says "The document and the validation errors will be sent to *provider*/*model*." (the ones of
+      your configuration) with **Send** and **Cancel**. **Cancel** → the dialog closes and no busy dialog follows.
+- [ ] **W-06** 🖥 With **Send** and a configured key: a dialog "Asking *provider*/*model* for a fix..." shows a busy bar and
+      **Cancel**; while it waits, menus, tabs and scrolling still work.
+- [ ] **W-07** 🖥 **Cancel** while it waits → the dialog closes at once. When the answer comes later, nothing opens and the
+      document is unchanged.
+- [ ] **W-08** 🖥 Remove the API key (unset the variable, and remove it from `cwled.env`) and use **Fix with AI** → the message
+      "API Key Missing" (the message Troubleshoot shows) and nothing else; no consent is asked.
+- [ ] **W-09** 🖥 Unset the variable but keep the key in `cwled.env` → the key is read from it and the flow goes on to the consent.
+
+### The answer
+
+- [ ] **W-10** 🖥 A real answer that is a document, with the explanation of the model around it (usual): the suggestion opens; the
+      explanation appears nowhere in the Code tab or in the comparison.
+- [ ] **W-11** 🖥 An answer without a CWL document (for example the model replies only "I cannot help") → "The answer could not
+      be used." and **Details** shows the answer. The Code tab is unchanged.
+- [ ] **W-12** 🖥 The Code tab text that is not YAML (for example `class: [unclosed` typed in the Code tab, not updated) → the
+      flow still starts; the comparison shows "Not a CWL document: compare the lines" on the left, and the lines are coloured.
+
+### The comparison, Apply and Discard
+
+- [ ] **W-13** 🖥 The comparison shows **Current document ↔ Suggested fix**: the changed lines are coloured on both sides and the
+      changed parts are listed on the left (for example `outputs out`).
+- [ ] **W-14** 🖥 **Discard** → the Code tab text and the window title (no `*`) are as they were.
+- [ ] **W-15** 🖥 **Apply** → the Code tab shows the suggested text, the window title gets a `*`, and the App and Info tabs show
+      the change. The comments the model wrote are in the Code tab.
+- [ ] **W-16** 🖥 After **Apply**, **Undo** (⌘Z on macOS, Ctrl+Z elsewhere) in the Code tab takes the whole suggestion back in one
+      step; the text is what it was before **Apply**.
+- [ ] **W-17** 🖥 **Save** after **Apply** → the saved file is the suggestion (the Code tab text the model wrote, with the comments).
+- [ ] **W-18** The document that has unsaved changes in the Code tab is the one sent: the suggestion is based on the text
+      that is shown, not on the file on disk.
+
+### Automated
+
+- [ ] **W-19** `uv run pytest pytests/test_fix_with_ai.py` → all tests pass (seconds, no network, no key needed).
 
 ---
 

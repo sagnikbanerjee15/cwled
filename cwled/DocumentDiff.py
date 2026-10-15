@@ -48,9 +48,10 @@ class DocumentSource:
     cwl: dict                       # the document as a dictionary
     window: Any = None              # the document, when it is one that is open
     detail: str = ''                # more about the source (path, commit)
+    raw: Optional[str] = None       # the text itself, when it is not a CWL document (see sourceFromText)
 
     def text(self) -> str:
-        return canonicalYaml(self.cwl)
+        return self.raw if self.raw is not None else canonicalYaml(self.cwl)
 
 
 @dataclass
@@ -159,6 +160,22 @@ def sourceFromFile(path, label: Optional[str] = None) -> DocumentSource:
     path = Path(path)
     parser = Parser(path)
     return DocumentSource(label or path.name, localised(save(parser.getCWL(), relative_uris=True)), detail=str(path))
+
+
+def sourceFromText(text: str, label: str) -> DocumentSource:
+    """
+    A document given as text, such as the Code tab's buffer or a suggestion of the LLM. It is read as
+    YAML (or JSON), not by the parser, which refuses the documents that have the errors being fixed.
+    Text that is not a dictionary is compared as it is (see ``DocumentSource.raw``).
+    """
+    try:
+        document = YAML().load(text)
+    except Exception as e:
+        logger.debug(f"'{label}' is not YAML: {e}")
+        document = None
+    if not isinstance(document, dict):
+        return DocumentSource(label, cwl={}, raw=text)
+    return DocumentSource(label, document)
 
 
 def _repository(path):

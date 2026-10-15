@@ -46,6 +46,7 @@ from copy import deepcopy
 from ports import PortSplitter
 from gitVersion import GitVersion
 from LLM import Troubleshoot, TroubleshootResponseDialog
+from LLMFix import suggestFix
 from BaseDialog import BaseDialog
 import uuid
 import shutil
@@ -1441,7 +1442,8 @@ class ChildWindow(QDialog):
                 self.logger.warning(f"\u26A0 This tool cannot be validated")
                 self.logger.warning(f"\n{details}")    
                 error_dialog = ErrorDialog(error_message="This tool cannot be validated",
-                                         details=f"{details}")
+                                         details=f"{details}",
+                                         actions=[("Fix with AI", lambda: suggestFix(self, details))])
                 error_dialog.exec()
             else:
                 self.logger.info("✓ Validation successful")

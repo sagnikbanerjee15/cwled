@@ -10,6 +10,7 @@
 - [Tab Synchronization Mechanism](#tab-synchronization-mechanism)
 - [Data Flow Patterns](#data-flow-patterns)
 - [Live Validation and the Problems Panel](#live-validation-and-the-problems-panel)
+- [Fix with AI](#fix-with-ai)
 - [Dialog System](#dialog-system)
 - [Running a Document](#running-a-document)
 - [Remote Folders](#remote-folders)
@@ -695,6 +696,39 @@ populateFromCWL(): setLexer(lexer) → attachAutocompletion(lexer): QsciAPIs(lex
 - cwltool logs its errors on its own loggers (`cwltool`, `salad`). While a check runs their propagation is off, so the `ErrorDialogHandler` on the root logger does not open a dialog for an invalid document; the messages come from the run's own buffer instead. `_CWLTOOL_LOCK` keeps two in-process cwltool runs apart.
 - The lexer is kept by `LiveValidation._lexer`: QScintilla forgets a lexer whose Python object is gone, and `QsciAPIs` needs the lexer alive.
 - The `validate` callable is injected (`LiveValidation(codeWindow, validate=...)`), so the tests run the debounce and the stale-result rule with fakes.
+
+## Fix with AI
+
+**Location**: `LLMFix.py`. It uses `BaseLLM` (`LLM.py`) for the model, `DocumentDiff.py` and `TabDiff.py` for the comparison.
+
+It starts from the **Fix with AI** button of the validation error dialog (`ChildWindow.onMenuValidate`, which passes the validator's messages), and from **Tools → Suggest a fix for the validation errors** (`MainWindow.onMenuSuggestFix` → `suggestFixForValidation`, which validates the Code tab text with `validateDocument` and calls `suggestFix` when it is invalid).
+
+```
+suggestFix(window, errors)
+    ↓
+FixWithAI()                    BaseLLM.setModel: no API key → "API Key Missing", stop
+    ↓
+askConsent()                   "...will be sent to provider/model."  Send | Cancel
+    ↓                          (nothing is sent before Send)
+_askInBackground()             _Request (a QThread) runs FixWithAI.requestFix → invokeModel
+                               _AskingDialog: busy bar and Cancel; a later answer is ignored
+    ↓
+documentFromAnswer()           the code block (or the answer) without the prose around it;
+    ↓ none                     it must parse as YAML and have a class
+_showUnusable()                "The answer could not be used." with the answer under Details
+    ↓
+FixReview                      DiffView: Current document ↔ Suggested fix
+                               (DocumentDiff.sourceFromText; text that is not YAML is compared as lines)
+    ↓ Apply                    applyToEditor(): the buffer takes the suggestion, CodeWindow.applyEditorChanges
+                               → codeUpdated → ChildWindow.onUpdateCWL (model, other tabs, modified marker);
+                               the buffer is then written again as one undo step
+    ↓ Discard                  nothing changes
+```
+
+Notes:
+- `_requests` keeps a cancelled request until its thread ends: a running `QThread` must not be destroyed.
+- `setText` clears the undo history of the editor, so `applyToEditor` sets the buffer back and writes the suggestion as one undoable replacement.
+- Expected failures are logged as warnings: an error record opens a modal error dialog (see `logger.py`).
 
 ## Dialog System
 

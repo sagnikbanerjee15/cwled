@@ -160,7 +160,9 @@ class DiffView(QWidget):
             return
         self.left, self.right = left, right
         self.left_lines, self.right_lines = alignedLines(left.text(), right.text())
-        self.changes = structuralChanges(left.cwl, right.cwl, self.left_lines, self.right_lines)
+        # a side that is not a CWL document has no parts to compare: only its lines are
+        not_documents = left.raw is not None or right.raw is not None
+        self.changes = [] if not_documents else structuralChanges(left.cwl, right.cwl, self.left_lines, self.right_lines)
         self.blocks = changeBlocks(self.right_lines)
         for title, source in ((self.left_title, left), (self.right_title, right)):
             title.setText(source.label)
@@ -176,7 +178,7 @@ class DiffView(QWidget):
                              CHANGED: "Different"}[change.kind])
             self.change_list.addItem(item)
         if not self.changes:
-            placeholder = QListWidgetItem("No changes")
+            placeholder = QListWidgetItem("Not a CWL document: compare the lines" if not_documents else "No changes")
             placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
             self.change_list.addItem(placeholder)
         if self.blocks:

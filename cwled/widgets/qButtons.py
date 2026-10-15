@@ -69,7 +69,8 @@ class QAddButton(QPushButton):
         theme.setButtonRole(self, 'link')
 
 class ErrorDialog(QDialog):
-    def __init__(self, error_message, details, title="Error"):
+    def __init__(self, error_message, details, title="Error", actions=None):
+        # actions: (label, callable) pairs, one button each above OK; the dialog closes, then the callable runs
         super().__init__()
         self.setWindowTitle(title)
         self.setModal(True)
@@ -101,10 +102,19 @@ class ErrorDialog(QDialog):
         # Add the QTextEdit to the layout
         layout.addWidget(detailed_text)
 
+        for label, action in actions or []:
+            action_button = QPushButton(label)
+            action_button.clicked.connect(lambda _checked=False, action=action: self._runAction(action))
+            layout.addWidget(action_button)
+
         # OK button to close the dialog
         close_button = QPushButton("OK")
         close_button.clicked.connect(self.accept)
         layout.addWidget(close_button)
+
+    def _runAction(self, action):
+        self.accept()
+        action()
 
     @staticmethod
     def remove_ansi_escape_codes( text:str):

@@ -42,6 +42,7 @@ import theme
 import GraphItems
 import DocumentDiff
 from TabDiff import DiffView
+from LLMFix import suggestFixForValidation
 from remoteFolders import RemoteFolders
 from RemoteFolderDialog import RemoteFolderDialog
 logger = logging.getLogger(__name__)
@@ -968,6 +969,8 @@ class MainWindow(WorkbenchWindow):
         tools_troubleshoot.triggered.connect(self.onMenuTroubleshooting)
         tools_compare=QAction(  "Compare with...",owner)
         tools_compare.triggered.connect(self.onMenuCompare)
+        tools_suggest_fix=QAction("Suggest a fix for the validation errors",owner)
+        tools_suggest_fix.triggered.connect(self.onMenuSuggestFix)
 
         new_commandtool=QAction( "Command line tool", owner)
         new_commandtool.triggered.connect(self.onMenuNewCommandTool)
@@ -1007,6 +1010,7 @@ class MainWindow(WorkbenchWindow):
         tools_menu=menu_bar.addMenu( "&Tools")
         tools_menu.addAction( tools_validate)
         tools_menu.addAction( tools_run)
+        tools_menu.addAction( tools_suggest_fix)
         tools_menu.addAction( tools_compare)
         tools_menu.addAction( tools_maketemplate)
         tools_menu.addAction( tools_pack_workflow)
@@ -1651,6 +1655,13 @@ class MainWindow(WorkbenchWindow):
             return None
         if self.active_window:
             self.active_window.menuTroubleshoot.emit()
+
+    def onMenuSuggestFix(self):
+        """Tools > Suggest a fix for the validation errors of the active document (see LLMFix)."""
+        if not self.active_window:
+            self._warnNoDocument()
+            return None
+        suggestFixForValidation(self.active_window)
 
     def onMenuHelp(self):
         """
