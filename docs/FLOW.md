@@ -10,6 +10,7 @@
 - [Tab Synchronization Mechanism](#tab-synchronization-mechanism)
 - [Data Flow Patterns](#data-flow-patterns)
 - [Dialog System](#dialog-system)
+- [Running a Document](#running-a-document)
 - [Remote Folders](#remote-folders)
 - [Starting the Application](#starting-the-application)
 - [Graph Visualization](#graph-visualization)
@@ -808,6 +809,37 @@ Graph emits editingFinished
     ↓
 [Normal update cycle continues]
 ```
+
+## Running a Document
+
+**Tools → Run tool/workflow...** runs the open document with cwltool in a process of its own (`cwled/CWLRun.py`), so the editor stays responsive. The dialog (`cwled/RunDialog.py`) asks for the job and the output folder, shows the log as it arrives and the result when the run ends.
+
+```
+MainWindow.onMenuRun()                      (no document: _warnNoDocument)
+    ↓ active_window.menuRun.emit()
+ChildWindow.onMenuRun()
+    ↓
+RunDialog.startRunFromEditor(document)
+    ├─ unsaved or not on disk → questionCentered("Save Before Running?") → onToolbarSave()
+    └─ RunDialog(document).show()           (non-blocking; a WindowModal child of the document)
+RunDialog.startRun()
+    ├─ jobProblem(text)                     YAML/JSON that maps input names to values
+    ├─ jobForRun(text, outdir)              chosen file as it is, or the text written to <name>-job.yml
+    └─ CWLRun(document, job, outdir).start()
+CWLRun.start()   QProcess:  python -c GROUP_LEADER  python -m cwltool.main --disable-color --outdir … doc job
+    ├─ readyReadStandardOutput / Error → output(str) → RunDialog._appendLog   (decoded incrementally)
+    └─ finished → _onFinished → runEnded(status)   status: finished | failed | cancelled | error
+RunDialog._onRunEnded(status)
+    ├─ finished → outputs (JSON) and output_files (from the File/Directory locations) in the Result box
+    └─ failed / cancelled / error → status line; the log stays
+```
+
+- **Cancel run** → `CWLRun.cancel()`: SIGTERM to the process group (cwltool and the tools it started), SIGKILL after `STOP_GRACE_MS` if it has not ended. Closing the dialog → `RunDialog.done()` → `CWLRun.stop()`, which waits for the end.
+- **Why `cwltool.main`:** `python -m cwltool` does not pass cwltool's exit code on, so a failed run would look successful. `cwltool.main` exits with it.
+- **Why a process group:** cwltool starts the tool as a child; stopping cwltool alone leaves the tool running. The wrapper `GROUP_LEADER` makes the run its own group leader before it execs cwltool. A packaged application cannot run Python code with `-c`, so there the run is started as `--run-module cwltool` (see `cwled.py`, `configuration.py`) and only cwltool is stopped.
+- **Temporary folders:** cwltool uses its own (on macOS `/private/tmp/docker_tmp`). The tests move them into the test folder (`scratch` fixture).
+
+Classes and where they hook in: `ChildWindow.menuRun` (signal) and `onMenuRun`, `MainWindow.onMenuRun` and its Tools action, `CWLRun` (`commandLine`, `producedFiles`, `parseOutputs`, the runner), `RunDialog` (`startRunFromEditor`, `jobProblem`, the dialog). Tests: `pytests/test_run_from_editor.py`.
 
 ## Remote Folders
 

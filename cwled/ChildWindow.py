@@ -322,6 +322,7 @@ class ChildWindow(QDialog):
     """
     menuActionSignal = pyqtSignal(str)
     menuValidate = pyqtSignal()
+    menuRun = pyqtSignal()
     menuUpgradeVersion = pyqtSignal(str)
     menuPackWorkflow = pyqtSignal(str)
     menuRestructureWorkflow = pyqtSignal(str)
@@ -401,6 +402,7 @@ class ChildWindow(QDialog):
         self.menuGitPush.connect(self.onToolbarGitPush)
         self.menuGitPull.connect(self.onToolbarGitPull)
         self.menuValidate.connect(self.onMenuValidate)
+        self.menuRun.connect(self.onMenuRun)
         self.menuUpgradeVersion.connect(self.onMenuUpgradeVersion)
         self.menuPackWorkflow.connect(self.onMenuPackWorkflow)
         self.menuRestructureWorkflow.connect(self.onMenuRestructureWorkflow)
@@ -1369,6 +1371,11 @@ class ChildWindow(QDialog):
             )
             error_dialog.exec()
 
+
+    def onMenuRun(self):
+        """Run this document with cwltool, from the Run dialog (see RunDialog.py)."""
+        from RunDialog import startRunFromEditor
+        startRunFromEditor(self)
 
     def onMenuValidate(self):
         """

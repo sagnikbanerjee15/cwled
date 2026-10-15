@@ -943,6 +943,8 @@ class MainWindow(WorkbenchWindow):
 
         tools_validate=QAction(  "Validate tool",owner)
         tools_validate.triggered.connect(self.onMenuValidate)
+        tools_run=QAction(  "Run tool/workflow...",owner)
+        tools_run.triggered.connect(self.onMenuRun)
         tools_maketemplate=QAction(  "Generate template",owner)
         tools_maketemplate.triggered.connect(self.onMenuMakeTemplate)
         
@@ -1004,6 +1006,7 @@ class MainWindow(WorkbenchWindow):
 
         tools_menu=menu_bar.addMenu( "&Tools")
         tools_menu.addAction( tools_validate)
+        tools_menu.addAction( tools_run)
         tools_menu.addAction( tools_compare)
         tools_menu.addAction( tools_maketemplate)
         tools_menu.addAction( tools_pack_workflow)
@@ -1434,6 +1437,13 @@ class MainWindow(WorkbenchWindow):
             return None
         if self.active_window:
             self.active_window.menuValidate.emit()
+
+    def onMenuRun(self):
+        """Run the active document with cwltool (see RunDialog.py)."""
+        if not self.active_window:
+            self._warnNoDocument()
+            return None
+        self.active_window.menuRun.emit()
 
     def onMenuConfiguration(self):
         """

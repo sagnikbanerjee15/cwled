@@ -11,7 +11,7 @@ Each item reads: *what to do* → *what should happen*. Tick it when it does. No
 ## How to use this list
 
 1. Start with section **A** (things only real hardware can confirm), then go through the sections of
-   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, **O** the remote folders over SSH (only on the `ssh-remote-folders` branch), **P** the logo that shows at the start, and **T** the tests and documentation.
+   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, **O** the remote folders over SSH (only on the `ssh-remote-folders` branch), **P** the logo that shows at the start, **U** running a document from the editor, and **T** the tests and documentation.
 2. Use a scratch copy of the test documents, so that saving never touches the repository (outside the temporary directory, see below):
 
    ```bash
@@ -711,6 +711,38 @@ For each edit: **the `*` appears at once**, both in front of the **tab title** a
 
 ---
 
+## U. Run from the editor (Tools → Run tool/workflow...)
+
+The document is run with cwltool in a process of its own, and the Run dialog shows its log as it comes. The automated tests (`pytests/test_run_from_editor.py`) run the real cwltool on `tests/echo.cwl` and on small tools, and check the save-first question, the job template, cancelling, failures and the output list. They cannot see the dialog on a screen, the editor staying responsive, Finder, or the packaged application.
+Use a copy of the test documents (see *How to use this list*) for the runs that write files; the job files and output folders go next to the document or into the folder you choose.
+
+- [ ] **U-01** **Tools** menu: **Run tool/workflow...** is right under **Validate tool**.
+- [ ] **U-02** No document open (close all tabs), **Tools → Run tool/workflow...** → the "No Document: Please select a document first." warning, as for **Validate tool**.
+- [ ] **U-03** Type a change in the Code tab of `echo.cwl` (the `*` appears), then **Tools → Run tool/workflow...** → "Save Before Running?" with **Yes** / **No**. **No** → no dialog, the `*` stays. Run again, answer **Yes** → the document is saved (the `*` goes) and the Run dialog opens.
+- [ ] **U-04** A new document that was never saved (**File → New → Command line tool**), then Run → the question; **Yes** → the Save As dialog. Cancel it → no Run dialog. Save it → the Run dialog opens for the saved file.
+- [ ] **U-05** The Run dialog is titled **Run echo.cwl**. Its output folder is `echo-run-` followed by the date and time (`YYYYMMDD-HHMMSS`), in the folder of `echo.cwl`.
+- [ ] **U-06** **Generate from template** on `echo.cwl` → the box shows YAML with `message:`, the label says *Generated from the template (not saved yet)*, and no file appears next to `echo.cwl` (only `echo.cwl` in the folder).
+- [ ] **U-07** **Choose file...** → pick a job file (for example one written with `message: hello`) → its text appears in the box and its path in the field. **Run** → no `echo-job.yml` is created next to the document (the file was used as it is).
+- [ ] **U-08** Change the text in the box (`message: bye`), leave **Save the job as echo-job.yml next to the document when it runs** ticked, **Run** → `echo-job.yml` appears next to `echo.cwl` with the changed text. Untick the box and run again → the job is written into the output folder instead.
+- [ ] **U-09** 🖥 **Run** `echo.cwl` with `message: hello` → the status says *Running…* and the Run button is disabled; the log fills with cwltool's lines (`[job echo.cwl] …`, *completed success*) while it runs, and the Log box shows no colour codes or boxes.
+- [ ] **U-10** 🖥 While a run goes (use a tool that takes a few seconds), the editor stays usable: switch to the Code tab, scroll, type, open another document. Moving the Run dialog and the main window is smooth.
+- [ ] **U-11** After **U-09**: the status says *Finished, exit code 0. The results are in …*; the **Result** box shows the output as JSON (`"out": "hello\n"`) and under *Produced files* the line *(none: the outputs are values, not files)*.
+- [ ] **U-12** A tool whose output is a file (a `stdout:` output, for example) → after the run, *Produced files* lists the file; **Open output folder** shows the output folder.
+- [ ] **U-13** 🖥 **Open output folder** → Finder opens the output folder shown in the Output box (not the document's folder).
+- [ ] **U-14** 🖥 A workflow (for example `50-workflow.cwl`, with the job its inputs need: **Generate from template** helps) runs to the end; the Result box shows its outputs and the log shows each step.
+- [ ] **U-15** `uppercase.cwl` (an expression tool) with `message: hello` → *Finished*, the result is `"uppercase_message": "HELLO"`. (Needs Node.js on this machine; without it the run fails and the log names Node.js.)
+- [ ] **U-16** A job that is not YAML or JSON (for example `message: [unclosed`) → the warning *The job is not YAML or JSON that names the inputs*; nothing runs and the log stays empty.
+- [ ] **U-17** An output folder that is an existing file, or an empty output folder field → a warning that names the problem; nothing runs.
+- [ ] **U-18** A tool that fails: a CommandLineTool with `baseCommand: [sh, -c]` and `arguments: ["echo oops >&2; exit 3"]`, run with `{}` → the status says *Failed, exit code 1. The log says what went wrong.*; the log shows `oops` and the failure; no error pop-up appears (the failure is not an error dialog); the Result box is hidden; **Run** is enabled again.
+- [ ] **U-19** 🖥 **Cancel** during a long run: write a small tool in a scratch folder (`baseCommand: sleep`, one input `seconds: int` with `inputBinding: {position: 1}`, no outputs) and run it with `seconds: 300` → press **Cancel run** → the status says *Stopping...* and then *Cancelled.* within a few seconds; afterwards no `sleep` or `cwltool` process is left (check Activity Monitor or `ps`).
+- [ ] **U-20** 🖥 Start the same long run and **close** the dialog (**Close**, Esc or the window's ×) → the run stops within a few seconds, as in **U-19**.
+- [ ] **U-21** 🖥 Run the document from a **detached** window (drag its tab out of the main window first): the dialog and the Save question appear over that window, not behind it.
+- [ ] **U-22** 🖥 With a long run going, the other documents of the window still respond (their tabs, menus and dialogs); only the document that is running is blocked by the Run dialog.
+- [ ] **U-23** 🖥 A packaged build (`make debug-mac`): **Run** `echo.cwl` → it finishes like in **U-09**, and no second CWLed window opens.
+- [ ] **U-24** Known gaps (do not report): from the packaged build, **Cancel** stops cwltool itself but not necessarily the tools it started (a source build stops the whole process group, see **U-19**); for a Docker tool, check that its container has stopped after **Cancel**; runs are local only (a document of a remote folder is run from its local copy).
+
+---
+
 ## T. Automated tests, CI and documentation
 
 - [ ] **T-01** `uv sync --group dev && uv run pytest` on your machine → all tests pass (about a minute; no window appears, nothing of your configuration, logs or caches is touched).
@@ -735,7 +767,7 @@ For each edit: **the `*` appears at once**, both in front of the **tab title** a
 - [ ] **R-04** Add and remove workspace folders; the first folder and the current folder behave as before (status bar, default folder of Save As, working directory).
 - [ ] **R-05** A file cannot be saved outside the workspace folders of **its window**; the message names the folders.
 - [ ] **R-06** Dialogs (Configuration, Draft CommandLineTool, Input/Output/Step dialogs, message boxes) appear over the window you are using, not behind another window.
-- [ ] **R-07** **Tools** menu: Validate, Generate template, Pack workflow, Repackage workflow, Save workflow documentation, Upgrade version, Troubleshoot — each acts on the active document of the window you use it in.
+- [ ] **R-07** **Tools** menu: Validate, Run tool/workflow, Generate template, Pack workflow, Repackage workflow, Save workflow documentation, Upgrade version, Troubleshoot — each acts on the active document of the window you use it in.
 - [ ] **R-08** Git buttons of the document toolbar (commit / push / pull) use the folder of the document (or of the current workspace folder of its window).
 - [ ] **R-09** Dragging a file from the side panel or **Recent** onto a workflow canvas still adds a step; this also works in a detached window.
 - [ ] **R-10** The Info tab's bottom ribbon (format / created / modified) and the Code tab's "File URI" row look normal at full width.

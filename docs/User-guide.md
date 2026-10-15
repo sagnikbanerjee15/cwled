@@ -24,6 +24,7 @@ The architecture of CWLed is designed for flexibility, catering to both visual-o
   - [Document Tabs](#document-tabs)
   - [Detached Windows](#detached-windows)
   - [Comparing Documents](#comparing-documents)
+  - [Running a Document](#running-a-document)
   - [Remote Folders (SSH)](#remote-folders-ssh)
   - [Welcome Tab](#welcome-tab)
   - [Status Bar](#status-bar)
@@ -196,6 +197,20 @@ The other document is shown on the left and yours on the right. Both are brought
 - **Swap the sides** exchanges them; **Compare again** reads the documents and files again, with the changes you made since.
 
 A comparison is a tab like any other: it can be torn off into a window of its own, for example next to the workflows it compares. It is not saved with the session.
+
+## Running a Document
+
+**Tools → Run tool/workflow...** runs the open tool or workflow with cwltool, on this computer, and shows what it does in the Run dialog. The editor stays usable while it runs. Tools that need Docker or Node.js (for expression tools) need them on this computer too.
+
+1. cwltool reads the document from disk. If the document has unsaved changes, or was never saved, CWLed asks whether to save it first; **No** cancels the run.
+2. The **job** is the input values, as YAML or JSON. Either
+   - **Choose file...** takes an existing `.yml`, `.yaml` or `.json` file (its text appears in the box, and you can change it there), or
+   - **Generate from template** fills the box with the template of the document, as **Generate template** does (see [Tools Menu](#tools-menu)).
+
+   A job that was generated or changed is saved as `<name>-job.yml` next to the document when the box below the text is ticked (the default); without it the job is written into the output folder. A chosen file that was not changed is used as it is. Relative paths in a job are relative to the job file.
+3. The **output folder** receives the results. It is a new folder named `<name>-run-<date>-<time>` next to the document; **Browse...** chooses another one.
+4. **Run** starts cwltool, and its log is shown as it comes. **Cancel run** stops it, with the tools it started. Closing the dialog stops a run that is still going.
+5. When the run finishes, the **Result** box shows the output (as JSON) and the files the outputs name, and **Open output folder** shows the folder in the file manager. A failed run keeps its log and says so.
 
 ## Remote Folders (SSH)
 
@@ -580,6 +595,8 @@ The application provides four menus: **File**, **Tools**, **Window** and **Help*
 ## Tools Menu
 
 - **Validate tool**: Validates the current CWL document using `cwltool --validate` (or another validator specified in your configuration). Reports any syntax errors or schema violations.
+
+- **Run tool/workflow...**: Runs the current document with cwltool and shows its log and result in a Run dialog (see [Running a Document](#running-a-document)).
 
 - **Generate template**: Uses `cwltool --make-template` to generate a template input file for the current tool or workflow. This creates a YAML file with all required and optional inputs pre-populated with placeholder values.
 
