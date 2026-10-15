@@ -11,7 +11,7 @@ Each item reads: *what to do* → *what should happen*. Tick it when it does. No
 ## How to use this list
 
 1. Start with section **A** (things only real hardware can confirm), then go through the sections of
-   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, **O** the remote folders over SSH (only on the `ssh-remote-folders` branch), **P** the logo that shows at the start, **U** running a document from the editor, **V** the Problems panel, live checks and autocompletion of the Code tab, **W** Fix with AI for validation errors, and **T** the tests and documentation.
+   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, **O** the remote folders over SSH (only on the `ssh-remote-folders` branch), **P** the logo that shows at the start, **U** running a document from the editor, **V** the Problems panel, live checks and autocompletion of the Code tab, **W** Fix with AI for validation errors, **X** the container assistant of the Docker image field, and **T** the tests and documentation.
 2. Use a scratch copy of the test documents, so that saving never touches the repository (outside the temporary directory, see below):
 
    ```bash
@@ -825,6 +825,35 @@ Use a scratch copy of `tests/echo.cwl` for the items that break the document.
 ### Automated
 
 - [ ] **W-19** `uv run pytest pytests/test_fix_with_ai.py` → all tests pass (seconds, no network, no key needed).
+
+## X. Container assistant (the Docker image of a tool)
+
+The three buttons under **Docker Image** in the Visual Editor of a CommandLineTool ask the container registries (Docker Hub, quay.io, other registries) only when clicked. Items marked **🖥** need the real network (or a real screen); the automated tests replace the network by a fake registry.
+
+- [ ] **X-01** 🖥 Turn Wi-Fi off, open `tests/09-arguments.cwl` → no message about a registry, the field shows `openjdk:9.0.1-11-slim`, and the buttons **Check image**, **Suggest BioContainers image** and **Pin digest** are under it with an empty line below. Turn Wi-Fi back on; while it was off nothing was requested.
+- [ ] **X-02** 🖥 Edit the Docker field and the arguments of the tool, click elsewhere, switch tabs (no button clicked) → no line appears under the buttons and nothing reaches the network (watch with a network monitor such as Little Snitch, or `lsof -i`, if you have one).
+- [ ] **X-03** 🖥 Field `ubuntu:22.04` → **Check image** → within a few seconds the line says *Found ubuntu:22.04, digest sha256:…*. Move, resize and switch tabs while it waits: the window keeps responding, and the buttons are greyed out until the answer comes.
+- [ ] **X-04** 🖥 Field `quay.io/biocontainers/samtools:1.19--h50ea8bc_0` → **Check image** → *Found …, digest sha256:…*.
+- [ ] **X-05** 🖥 Field `quay.io/biocontainers/samtools:no-such-tag` → **Check image** → *… is not in quay.io.*
+- [ ] **X-06** 🖥 Field `registry.example.com:5000/app:1` (a host that does not exist) → **Check image** → *Could not reach the registry: registry.example.com did not answer (…)* after a few seconds at most; the window does not freeze.
+- [ ] **X-07** 🖥 Wi-Fi off, field `ubuntu:22.04` → **Check image** → *Could not reach the registry* (not a crash, no error dialog, no log entry in red).
+- [ ] **X-08** Field empty, or `Ubuntu`, or `two words` → **Check image** → *Not an image reference: …*; no network traffic (X-02 method).
+- [ ] **X-09** 🖥 Base command `samtools view`, field empty → **Suggest BioContainers image** → a small dialog lists the newest tags of `quay.io/biocontainers/samtools`, newest first, with the first one selected; at most 20 tags.
+- [ ] **X-10** 🖥 In that dialog choose another tag and press **OK** (or double-click it) → the field reads `quay.io/biocontainers/samtools:<tag>`, the line says *Set to …*, and the Code tab shows the same `dockerPull`.
+- [ ] **X-11** In that dialog press **Cancel** → the field and the Code tab are unchanged, the line is empty.
+- [ ] **X-12** 🖥 Base command `xyzzy-no-such-tool` → **Suggest BioContainers image** → *There is no BioContainers image named xyzzy-no-such-tool on quay.io.* and no dialog.
+- [ ] **X-13** Base command empty (no rows in **Base Command**) → **Suggest BioContainers image** → *Set the base command first …*; no network traffic.
+- [ ] **X-14** 🖥 Base command `/usr/bin/Samtools view` (a path and a capital letter) → **Suggest BioContainers image** lists the `samtools` tags (the directory and the case are ignored).
+- [ ] **X-15** 🖥 Wi-Fi off → **Suggest BioContainers image** → *Could not reach the registry* and no dialog.
+- [ ] **X-16** 🖥 Field `ubuntu:22.04` → **Pin digest** → the field reads `ubuntu@sha256:…` (the tag is gone from the field), the line says *Pinned ubuntu:22.04 to sha256:…* (the tag stays in view there), and the Code tab shows `dockerPull: ubuntu@sha256:…`; the document is marked as modified.
+- [ ] **X-17** After X-16 **Pin digest** is greyed out, with a tooltip saying the image is already pinned; **Check image** on the pinned field says *Found … digest sha256:…* (the same digest).
+- [ ] **X-18** Retype the field after X-16 (for example `ubuntu:22.04`) → **Pin digest** is enabled again; the pinned value is gone (undo by retyping).
+- [ ] **X-19** 🖥 Wi-Fi off, field `ubuntu:22.04` → **Pin digest** → the field does not change, the line says *Could not reach the registry …*, and **Pin digest** is greyed out; the tooltip (hover) gives the same reason. Type a different image → it is enabled again.
+- [ ] **X-20** Field empty or `Ubuntu` → **Pin digest** is greyed out; the tooltip says *Not an image reference: …*.
+- [ ] **X-21** 🖥 Save after X-16 and reopen the file → the `dockerPull` in the saved file is `ubuntu@sha256:…`; **Tools → Validate tool** accepts the tool (`cwltool --validate`).
+- [ ] **X-22** 🖥 Proxy: start CWLed with `HTTPS_PROXY=http://127.0.0.1:9` (a port with nothing listening) and click **Check image** on `ubuntu:22.04` → *Could not reach the registry* (the request went through the proxy, which refused it). Without the variable the check works again.
+- [ ] **X-23** 🖥 Dark and light themes, a narrow window: the three buttons, the line under them and the tooltips are readable; the line wraps instead of widening the Visual Editor.
+- [ ] **X-24** Known limits (do not report as bugs): private registries that need a login are *could not reach*; Docker Hub and quay.io may rate-limit a burst of checks; **Pin digest** keeps only `image@digest` (the tag is not written into the field); for a multi-platform image the digest is the one of the image index; the digest of a *Check* on a `@sha256:` image is looked up in the same registry.
 
 ---
 

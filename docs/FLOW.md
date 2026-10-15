@@ -183,6 +183,40 @@ Widget changed → Widget.editingFinished signal → GroupWidget catches →
 GroupWidget.editingFinished → ToolEditor.onEditingFinished → codeUpdated signal
 ```
 
+### Container assistant (Docker image field)
+
+**Location**: `containerRegistry.py` (logic and the buttons), wired into `widgets/qDocker.py`
+
+**Purpose**: Check a Docker image against its registry, suggest a BioContainers image for the tool, pin the image to its digest. Nothing is requested unless a button is clicked.
+
+**Data flow** (a click; the other two buttons follow the same path):
+
+```
+Check / Suggest / Pin button clicked
+    ↓
+ContainerAssistant._start(function, argument, handler)   [GUI thread: buttons greyed out]
+    ↓
+_Lookup(QThread).run()                                    [worker thread]
+    ↓   checkImage(text) / listBioContainersTags(tool) / pinImage(text)
+parseImageReference() → manifestOf() / _request()         [only place that uses urllib]
+    ↓   urllib.request.urlopen(request, timeout=8)  (honours HTTPS_PROXY, NO_PROXY)
+result (ImageCheck / TagList / Pin, or None after an unexpected error)
+    ↓   _Lookup.done signal, queued to the GUI thread
+ContainerAssistant._finish(handler, result)
+    ↓
+Result line updated; Suggest → BioContainersChooser (modal), Pin → field.setText(image@digest)
+    ↓
+ContainerAssistant.imageChanged signal
+    ↓
+QDockerWidget.onDockerImageChanged() → QDockerWidget.editingFinished
+    ↓
+ToolEditor.onDockerImageChange() → ToolEditor.codeUpdated → ChildWindow.onUpdateCWL()
+```
+
+**Failures**: a registry that cannot be reached, asks for a login or has no such image is a result (`UNREACHABLE`, `NOT_FOUND`) shown on the result line and logged as a warning. Only an unexpected exception in the worker is logged as an error.
+
+**Context**: the tool's base command is read through the parents of the Docker widget (the nearest widget with a `basecommand`, the tool editor) when Suggest is clicked, not when the tool opens.
+
 ### TabWorkflowEditor
 
 **Location**: `TabWorkflowEditor.py`

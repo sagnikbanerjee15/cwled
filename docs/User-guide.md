@@ -35,6 +35,7 @@ The architecture of CWLed is designed for flexibility, catering to both visual-o
   - [Visual Editor Tab](#visual-editor-tab)
     - [Inspector](#inspector)
     - [Expression Editor](#expression-editor)
+    - [Docker Image and the Container Assistant](#docker-image-and-the-container-assistant)
     - [Command Line Preview](#command-line-preview)
   - [Code Tab](#code-tab)
     - [Problems Panel and Live Checks](#problems-panel-and-live-checks)
@@ -330,7 +331,7 @@ Lists show one bar per entry with the column names above them. Click a bar to ed
 
 *Expression fields* (for example *Value Transform*, *Glob* or the stream redirects) have a button attached on their right. A plain value is typed directly and the `</>` button opens the [Expression Editor](#expression-editor). When the field holds a CWL expression (`$(...)` or `${...}`) it is shown greyed out after a bold **E:**; click the field to edit the expression in the Expression Editor, or click the × button to clear it.
 
-*Docker Image*: The *Docker Repository* (image) the tool runs in (DockerRequirement).
+*Docker Image*: The *Docker Repository* (image) the tool runs in (DockerRequirement), with the [container assistant](#docker-image-and-the-container-assistant) buttons (*Check image*, *Suggest BioContainers image*, *Pin digest*).
 *Base Command*: The main executable of the tool (e.g., bwa, samtools, echo), one field per word in the order they appear on the command line.
 *Arguments*: Fixed command-line arguments or dynamic ones based on JavaScript expressions, with their *Value*, *Prefix*, whether prefix and value are *Separate* (✔) and their position (*#*).
 *Input Ports*: The input parameters of the tool with their *ID*, *Type* (e.g. `File`, `Array<File>`, `string?` for an optional string) and *Binding* (the prefix, `pos: N`, or `unbound` when the input is not on the command line). Optional inputs are shown in grey. Record inputs list their fields below the record.
@@ -370,6 +371,16 @@ CWL expressions are written in the Expression Editor, which opens from the `</>`
 - The functions of the tool's *Expression library* (InlineJavascriptRequirement) are available to the expression.
 - Typing `inputs.`, `self.` or `runtime.` (or a property after them, such as `inputs.reads.`) lists what can follow; the beginning of `inputs`, `runtime` or `self` completes too. **Ctrl+Space** shows the list at any time. Pick an entry with the arrow keys and Enter (or a click).
 - **Save** puts the expression in the field; **Cancel**, the × or Escape close the editor without changing the field.
+
+### Docker Image and the Container Assistant
+
+The *Docker Image* section holds the image the tool runs in (the `dockerPull` of its DockerRequirement). Three buttons sit under the field, and each asks a container registry only when you click it; opening the tool or editing it never does. The result, or the reason for a failure, appears on the line under the buttons.
+
+- **Check image**: looks the image up in its registry and says whether it exists, with its digest (`sha256:…`). Images written without a host are on Docker Hub (`ubuntu:22.04`, `library/ubuntu`); `quay.io/…` is read from Quay, and other registries (such as `registry.example.com:5000/app:1`) through their standard API. A registry that cannot be reached, or that asks for a login, is reported as *Could not reach the registry*.
+- **Suggest BioContainers image**: takes the tool's name from the first word of the [Base Command](#visual-editor-tab) (`samtools view` gives `samtools`) and lists the newest tags of `quay.io/biocontainers/samtools` in a small dialog, newest first. Choose one and **OK** (or double-click it) to fill the field with `quay.io/biocontainers/samtools:<tag>`; **Cancel** changes nothing.
+- **Pin digest**: looks up the digest of the image as it is now and rewrites the field as `image@sha256:…`, so that the tool always runs the same image. The tag is not kept in the field, but the line shows it (*Pinned ubuntu:22.04 to sha256:…*). To change the image again, type it in the field. The button is greyed out when the image already has a digest, or when its digest cannot be found (the tooltip gives the reason); it is enabled again once the field changes.
+
+Requests time out after 8 seconds. They go through the proxy named in the `HTTPS_PROXY` (or `HTTP_PROXY`) environment variable, and `NO_PROXY` is honoured.
 
 ### Command Line Preview
 

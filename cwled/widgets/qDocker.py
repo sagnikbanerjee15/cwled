@@ -2,6 +2,7 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
 from .qLabelLineEditWidget import QLabelLineEditWidget
 from cwl_utils_handler import get_cwl_module
+from containerRegistry import ContainerAssistant
 from typing import Any, Optional
 from widgets.QCWLedWidget import QCWLedWidget
 
@@ -62,6 +63,10 @@ class QDockerWidget(QCWLedWidget):
         
         # Add widget to layout
         layout.addWidget(self.docker_image)
+        # Check the image, suggest a BioContainers one, pin its digest (buttons act on click only)
+        self.assistant = ContainerAssistant(self.docker_image, self._toolBaseCommands, parent=self)
+        self.assistant.imageChanged.connect(self.onDockerImageChanged)
+        layout.addWidget(self.assistant)
         layout.addStretch(1)
         
         # Set layout for this widget
@@ -71,6 +76,16 @@ class QDockerWidget(QCWLedWidget):
         if self.default_value:
             self.populateFields()
     
+    def _toolBaseCommands(self) -> list:
+        '''
+        The base command rows of the tool this requirement belongs to: the nearest parent
+        widget that has a base command editor (the tool editor).
+        '''
+        owner = self.parent()
+        while owner is not None and not hasattr(owner, 'basecommand'):
+            owner = owner.parent()
+        return owner.basecommand.getData() if owner is not None else []
+
     def onDockerImageChanged(self):
         '''
         Handler for when the Docker image URI is changed by the user.
