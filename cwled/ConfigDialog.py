@@ -89,7 +89,12 @@ class ConfigDialog(QDialog):
         default_cwl_version_layout.addWidget(label)
         default_cwl_version_layout.addWidget(self.default_cwl_version)
         layout.addLayout(default_cwl_version_layout)
-        
+
+        # A document older than v1.2 is opened as it is, unless this is ticked
+        self.ask_upgrade_check = QCheckBox("Ask whether to upgrade documents older than CWL v1.2 when they are opened")
+        self.ask_upgrade_check.setChecked(bool(self.config.get('ask_to_upgrade_cwl_version', False)))
+        layout.addWidget(self.ask_upgrade_check)
+
         # Theme (applied at once when the dialog is accepted)
         theme_layout = QHBoxLayout()
         theme_label = QLabel("Theme")
@@ -640,6 +645,7 @@ class ConfigDialog(QDialog):
         self.config['restore_session'] = self.restore_session_check.isChecked()
         self.config['show_splash'] = self.show_splash_check.isChecked()
         self.config['live_validation'] = self.live_validation_check.isChecked()
+        self.config['ask_to_upgrade_cwl_version'] = self.ask_upgrade_check.isChecked()
         self.config['theme'] = self.theme_combo.currentText()
         
         # Make sure main_window dictionary exists

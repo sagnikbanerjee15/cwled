@@ -102,6 +102,9 @@ cwl_version:
   supported: true
 # the default cwl version to use for a new tool/workflow
 default_cwl_version: v1.0
+# ask whether to upgrade a document older than v1.2 when it is opened (false: open it as it is, without asking;
+# Tools > Upgrade CWL version converts it later)
+ask_to_upgrade_cwl_version: false
 # apply formatting rules to how the ids are created
 # this affects new ids, not existing ones
 # camelCase

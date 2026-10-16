@@ -584,6 +584,7 @@ This tab contains basic application settings.
 *   **Reopen the documents and windows of the last session at start**: When on (the default) the documents that were open when you quit, the windows tabs were torn off into and their positions are restored at the next start.
 *   **Show the logo while CWLed starts**: When on (the default) the [logo window](#the-logo) shows while the application starts.
 *   **Check the document while typing in the Code tab (Problems panel)**: When on (the default) the document is checked 1.5 seconds after the last edit while the Code tab is shown, and the [Problems panel](#problems-panel-and-live-checks) lists the messages. When off, nothing is checked by itself; the **Check** button of the panel still checks.
+*   **Ask whether to upgrade documents older than CWL v1.2 when they are opened**: Off by default: a document of an older CWL version is opened as it is, without a question, and **Tools → Upgrade CWL version** converts it when you want. When on, opening such a document first asks *Upgrade to v1.2* or *Continue as is* (*Continue as is* is the default answer).
 *   **Window Size**: Set the initial width and height of the main application window. The window is never opened larger than the screen.
 
 ## Logging Tab
@@ -654,7 +655,7 @@ The application provides four menus: **File**, **Tools**, **Window** and **Help*
 
 - **Save workflow documentation**: Saves an HTML description of the workflow.
 
-- **Upgrade CWL version**: Upgrades the current document to the latest CWL specification version using `cwl-upgrader`. This helps modernize older CWL documents to use newer features.
+- **Upgrade CWL version**: Upgrades the current document to the latest CWL specification version using `cwl-upgrader`. This helps modernize older CWL documents to use newer features. A document of an older version is opened as it is, without asking (see the [General tab](#general-tab) to be asked).
 
 - **Configuration**: Opens the [Configuration](#configuration) dialog. On macOS this item is in the application menu as **Preferences...**.
 

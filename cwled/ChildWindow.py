@@ -2052,7 +2052,7 @@ class ChildWindow(QDialog):
             traceback.print_exc()
 
 
-        if self.cwl_tool.cwlVersion != 'v1.2':
+        if self.cwl_tool.cwlVersion != 'v1.2' and (data.configuration or {}).get('ask_to_upgrade_cwl_version', False):
             msg_box = QMessageBox(self)
             msg_box.setIcon(QMessageBox.Icon.Information)
             msg_box.setWindowTitle("CWL Version Notice")
@@ -2073,6 +2073,9 @@ class ChildWindow(QDialog):
                 self.file_path=str(fp)
                 self.loadCWL()
                 return
+        elif self.cwl_tool.cwlVersion != 'v1.2':
+            # the default: open it as it is, without asking (Tools > Upgrade CWL version converts it later)
+            self.logger.info(f"The document is CWL {self.cwl_tool.cwlVersion}: opened as it is")
 
 
         try:

@@ -11,7 +11,7 @@ Each item reads: *what to do* → *what should happen*. Tick it when it does. No
 ## How to use this list
 
 1. Start with section **A** (things only real hardware can confirm), then go through the sections of
-   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, **O** the remote folders over SSH (only on the `ssh-remote-folders` branch), **P** the logo that shows at the start, **U** running a document from the editor, **V** the Problems panel, live checks and autocompletion of the Code tab, **W** Fix with AI for validation errors, **X** the container assistant of the Docker image field, and **T** the tests and documentation.
+   the features you care about. Section **R** is a quick pass over older behaviour, **S** covers the `*` marker and the save prompt, **O** the remote folders over SSH (only on the `ssh-remote-folders` branch), **P** the logo that shows at the start, **U** running a document from the editor, **V** the Problems panel, live checks and autocompletion of the Code tab, **W** Fix with AI for validation errors, **X** the container assistant of the Docker image field, **Y** documents older than CWL v1.2 opening without a question, and **T** the tests and documentation.
 2. Use a scratch copy of the test documents, so that saving never touches the repository (outside the temporary directory, see below):
 
    ```bash
@@ -854,6 +854,20 @@ The three buttons under **Docker Image** in the Visual Editor of a CommandLineTo
 - [ ] **X-22** 🖥 Proxy: start CWLed with `HTTPS_PROXY=http://127.0.0.1:9` (a port with nothing listening) and click **Check image** on `ubuntu:22.04` → *Could not reach the registry* (the request went through the proxy, which refused it). Without the variable the check works again.
 - [ ] **X-23** 🖥 Dark and light themes, a narrow window: the three buttons, the line under them and the tooltips are readable; the line wraps instead of widening the Visual Editor.
 - [ ] **X-24** Known limits (do not report as bugs): private registries that need a login are *could not reach*; Docker Hub and quay.io may rate-limit a burst of checks; **Pin digest** keeps only `image@digest` (the tag is not written into the field); for a multi-platform image the digest is the one of the image index; the digest of a *Check* on a `@sha256:` image is looked up in the same registry.
+
+---
+
+## Y. Documents older than CWL v1.2 open without a question
+
+A document whose `cwlVersion` is older than `v1.2` is opened as it is: the "CWL Version Notice" (*Upgrade to v1.2* / *Continue as is*) is not shown any more, unless **Ask whether to upgrade documents older than CWL v1.2 when they are opened** is ticked in **Tools → Configuration → General**. New documents get the *Default CWL Version* of the same tab (`v1.0` in the shipped configuration), so they are "older" too and reopen silently. The automated tests (`pytests/test_old_cwl_version_notice.py`) check the setting, the silent open and the question when it is on.
+
+Make an old document in a scratch folder: copy `tests/echo.cwl` and change its `cwlVersion` line to `v1.0`.
+
+- [ ] **Y-01** 🖥 Start CWLed with it (`uv run ./cwled.py <folder>/echo-v1.0.cwl`) → the document opens at once, **no** "CWL Version Notice" box. The Code tab still says `cwlVersion: v1.0`, and no upgraded copy appears in the folder.
+- [ ] **Y-02** **File → Open file …**, a double click in the Workspace tree and an entry of the Recent list: each opens the old document without a question.
+- [ ] **Y-03** 🖥 Leave the old document open, quit CWLed, start it again (*Reopen the documents … of the last session* is on) → it comes back without a question. Same with a *new* tool created with the default version `v1.0`, saved, and reopened.
+- [ ] **Y-04** **Tools → Upgrade CWL version** on the old document still works as before: it asks for a file name, writes the v1.2 copy there and says so; the original is not changed.
+- [ ] **Y-05** 🖥 **Tools → Configuration → General**: tick **Ask whether to upgrade documents older than CWL v1.2 when they are opened**, press OK, open the old document → the box asks *Upgrade to v1.2* or *Continue as is*; *Continue as is* is highlighted (Enter picks it) and keeps the document as it is, *Upgrade to v1.2* asks where to save the upgraded copy and then opens it. Untick it again → no question any more. A v1.2 document (`tests/echo.cwl`) never asks, ticked or not.
 
 ---
 
